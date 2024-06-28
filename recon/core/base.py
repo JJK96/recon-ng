@@ -4,7 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin
 import errno
-import imp
+import importlib.util
+import importlib.machinery
 import json
 import os
 import random
@@ -184,6 +185,15 @@ class Recon(framework.Framework):
         print(random.choice(eggs))
         return
 
+    def _load_source(self, modname, filename):
+        loader = importlib.machinery.SourceFileLoader(modname, filename)
+        spec = importlib.util.spec_from_file_location(modname, filename, loader=loader)
+        module = importlib.util.module_from_spec(spec)
+        # cache the module in sys.modules
+        sys.modules[module.__name__] = module
+        loader.exec_module(module)
+        return module
+
     #==================================================
     # WORKSPACE METHODS
     #==================================================
@@ -238,7 +248,7 @@ class Recon(framework.Framework):
         self.query('CREATE TABLE IF NOT EXISTS locations (latitude TEXT, longitude TEXT, street_address TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS vulnerabilities (host TEXT, reference TEXT, example TEXT, publish_date TEXT, category TEXT, status TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS ports (ip_address TEXT, host TEXT, port TEXT, protocol TEXT, banner TEXT, notes TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS hosts (host TEXT, ip_address TEXT, region TEXT, country TEXT, latitude TEXT, longitude TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS hosts (host TEXT, ip_address TEXT, region TEXT, country TEXT, latitude TEXT, longitude TEXT, organization TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS contacts (first_name TEXT, middle_name TEXT, last_name TEXT, email TEXT, title TEXT, region TEXT, country TEXT, phone TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS credentials (username TEXT, password TEXT, hash TEXT, type TEXT, leak TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS leaks (leak_id TEXT, description TEXT, source_refs TEXT, leak_type TEXT, title TEXT, import_date TEXT, leak_date TEXT, attackers TEXT, num_entries TEXT, score TEXT, num_domains_affected TEXT, attack_method TEXT, target_industries TEXT, password_hash TEXT, password_type TEXT, targets TEXT, media_refs TEXT, notes TEXT, module TEXT)')
@@ -323,6 +333,7 @@ class Recon(framework.Framework):
             self.query('PRAGMA user_version = 10')
         if db_version(self) == 10:
             self.query('ALTER TABLE profiles ADD COLUMN contact_id INTEGER')
+            self.query('ALTER TABLE hosts ADD COLUMN organization TEXT')
             self.query('PRAGMA user_version = 11')
         if db_orig != db_version(self):
             self.alert(f"Database upgraded to version {db_version(self)}.")
@@ -467,11 +478,9 @@ class Recon(framework.Framework):
         mod_dispname = '/'.join(re.split('/modules/', dirpath)[-1].split('/') + [mod_name])
         mod_loadname = mod_dispname.replace('/', '_')
         mod_loadpath = os.path.join(dirpath, filename)
-        mod_file = open(mod_loadpath)
         try:
             # import the module into memory
-            mod = imp.load_source(mod_loadname, mod_loadpath, mod_file)
-            __import__(mod_loadname)
+            mod = self._load_source(mod_loadname, mod_loadpath)
             # add the module to the framework's loaded modules
             self._loaded_modules[mod_dispname] = sys.modules[mod_loadname].Module(mod_dispname)
             self._categorize_module(mod_category, mod_dispname)
