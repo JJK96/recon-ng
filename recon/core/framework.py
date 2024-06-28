@@ -579,13 +579,14 @@ class Framework(cmd.Cmd):
         if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_profiles(self, username=None, resource=None, url=None, category=None, notes=None, mute=False):
+    def insert_profiles(self, username=None, resource=None, url=None, category=None, contact_id=None, notes=None, mute=False):
         '''Adds a profile to the database and returns the affected row count.'''
         data = dict(
             username = username,
             resource = resource,
             url = url,
             category = category,
+            contact_id = contact_id,
             notes = notes
         )
         rowcount = self.insert('profiles', data.copy(), ('username', 'url'))
