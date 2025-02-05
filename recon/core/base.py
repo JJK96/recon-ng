@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 import errno
 import importlib.util
 import importlib.machinery
+from importlib.machinery import SourceFileLoader
 import json
 import os
 import random
@@ -480,7 +481,8 @@ class Recon(framework.Framework):
         mod_loadpath = os.path.join(dirpath, filename)
         try:
             # import the module into memory
-            mod = self._load_source(mod_loadname, mod_loadpath)
+            mod = SourceFileLoader(mod_loadname, mod_loadpath).load_module()
+            __import__(mod_loadname)
             # add the module to the framework's loaded modules
             self._loaded_modules[mod_dispname] = sys.modules[mod_loadname].Module(mod_dispname)
             self._categorize_module(mod_category, mod_dispname)
