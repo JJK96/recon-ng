@@ -245,6 +245,7 @@ class Recon(framework.Framework):
     def _create_db(self):
         self.query('CREATE TABLE IF NOT EXISTS domains (domain TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS companies (company TEXT, description TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS tenants (brand TEXT, name TEXT, id TEXT, region TEXT, subregion TEXT, domain TEXT, desktopSSOEnabled BOOLEAN, CBAEnabled BOOLEAN, usesCloudSync BOOLEAN, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS netblocks (netblock TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS locations (latitude TEXT, longitude TEXT, street_address TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS vulnerabilities (host TEXT, reference TEXT, example TEXT, publish_date TEXT, category TEXT, status TEXT, notes TEXT, module TEXT)')
@@ -257,7 +258,7 @@ class Recon(framework.Framework):
         self.query('CREATE TABLE IF NOT EXISTS profiles (username TEXT, resource TEXT, url TEXT, category TEXT, contact_id INTEGER, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS repositories (name TEXT, owner TEXT, description TEXT, resource TEXT, category TEXT, url TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS dashboard (module TEXT PRIMARY KEY, runs INT)')
-        self.query('PRAGMA user_version = 11')
+        self.query('PRAGMA user_version = 12')
 
     def _migrate_db(self):
         db_version = lambda self: self.query('PRAGMA user_version')[0][0]
@@ -336,6 +337,9 @@ class Recon(framework.Framework):
             self.query('ALTER TABLE profiles ADD COLUMN contact_id INTEGER')
             self.query('ALTER TABLE hosts ADD COLUMN organization TEXT')
             self.query('PRAGMA user_version = 11')
+        if db_version(self) == 11:
+            self.query('CREATE TABLE IF NOT EXISTS tenants (brand TEXT, name TEXT, id TEXT, region TEXT, subregion TEXT, domain TEXT, desktopSSOEnabled BOOLEAN, CBAEnabled BOOLEAN, usesCloudSync BOOLEAN, module TEXT)')
+            self.query('PRAGMA user_version = 12')
         if db_orig != db_version(self):
             self.alert(f"Database upgraded to version {db_version(self)}.")
 
