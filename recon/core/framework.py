@@ -413,6 +413,23 @@ class Framework(cmd.Cmd):
         if not mute: self._display(data, rowcount)
         return rowcount
 
+    def insert_tenants(self, brand=None, name=None, id=None, region=None, subregion=None, domain=None, desktopSSOEnabled=None, CBAEnabled=None, usesCloudSync=None, mute=False):
+        '''Adds a tenant to the database and returns the affected row count.'''
+        data = dict(
+            brand=brand,
+            name=name,
+            id=id,
+            region=region,
+            subregion=subregion,
+            domain=domain,
+            desktopSSOEnabled=desktopSSOEnabled,
+            CBAEnabled=CBAEnabled,
+            usesCloudSync=usesCloudSync
+        )
+        rowcount = self.insert('tenants', data.copy(), data.keys())
+        if not mute: self._display(data, rowcount)
+        return rowcount
+
     def insert_companies(self, company=None, description=None, notes=None, mute=False):
         '''Adds a company to the database and returns the affected row count.'''
         data = dict(
