@@ -492,10 +492,11 @@ class Framework(cmd.Cmd):
         if not mute: self._display(data, rowcount)
         return rowcount
 
-    def insert_hosts(self, host=None, ip_address=None, region=None, country=None, latitude=None, longitude=None, notes=None, mute=False):
+    def insert_hosts(self, host=None, cname=None, ip_address=None, region=None, country=None, latitude=None, longitude=None, notes=None, mute=False):
         '''Adds a host to the database and returns the affected row count.'''
         data = dict(
             host = host,
+            cname = cname,
             ip_address = ip_address,
             region = region,
             country = country,

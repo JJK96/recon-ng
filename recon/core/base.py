@@ -250,7 +250,7 @@ class Recon(framework.Framework):
         self.query('CREATE TABLE IF NOT EXISTS locations (latitude TEXT, longitude TEXT, street_address TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS vulnerabilities (host TEXT, reference TEXT, example TEXT, publish_date TEXT, category TEXT, status TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS ports (ip_address TEXT, host TEXT, port TEXT, protocol TEXT, banner TEXT, notes TEXT, module TEXT)')
-        self.query('CREATE TABLE IF NOT EXISTS hosts (host TEXT, ip_address TEXT, region TEXT, country TEXT, latitude TEXT, longitude TEXT, organization TEXT, notes TEXT, module TEXT)')
+        self.query('CREATE TABLE IF NOT EXISTS hosts (host TEXT, cname TEXT, ip_address TEXT, region TEXT, country TEXT, latitude TEXT, longitude TEXT, organization TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS contacts (first_name TEXT, middle_name TEXT, last_name TEXT, email TEXT, title TEXT, region TEXT, country TEXT, phone TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS credentials (username TEXT, password TEXT, hash TEXT, type TEXT, leak TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS leaks (leak_id TEXT, description TEXT, source_refs TEXT, leak_type TEXT, title TEXT, import_date TEXT, leak_date TEXT, attackers TEXT, num_entries TEXT, score TEXT, num_domains_affected TEXT, attack_method TEXT, target_industries TEXT, password_hash TEXT, password_type TEXT, targets TEXT, media_refs TEXT, notes TEXT, module TEXT)')
@@ -258,7 +258,7 @@ class Recon(framework.Framework):
         self.query('CREATE TABLE IF NOT EXISTS profiles (username TEXT, resource TEXT, url TEXT, category TEXT, contact_id INTEGER, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS repositories (name TEXT, owner TEXT, description TEXT, resource TEXT, category TEXT, url TEXT, notes TEXT, module TEXT)')
         self.query('CREATE TABLE IF NOT EXISTS dashboard (module TEXT PRIMARY KEY, runs INT)')
-        self.query('PRAGMA user_version = 12')
+        self.query('PRAGMA user_version = 13')
 
     def _migrate_db(self):
         db_version = lambda self: self.query('PRAGMA user_version')[0][0]
@@ -340,6 +340,9 @@ class Recon(framework.Framework):
         if db_version(self) == 11:
             self.query('CREATE TABLE IF NOT EXISTS tenants (brand TEXT, name TEXT, id TEXT, region TEXT, subregion TEXT, domain TEXT, desktopSSOEnabled BOOLEAN, CBAEnabled BOOLEAN, usesCloudSync BOOLEAN, module TEXT)')
             self.query('PRAGMA user_version = 12')
+        if db_version(self) == 12:
+            self.query('ALTER TABLE hosts ADD COLUMN cname TEXT')
+            self.query('PRAGMA user_version = 13')
         if db_orig != db_version(self):
             self.alert(f"Database upgraded to version {db_version(self)}.")
 
