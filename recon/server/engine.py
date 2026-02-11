@@ -65,6 +65,7 @@ class Engine:
         
         # Import here to avoid circular imports and to allow patching paths
         from recon.core import base, framework
+        self._framework = framework  # Store reference for later use
         
         # Patch the framework paths before creating the Recon instance
         framework.Framework.app_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -87,7 +88,7 @@ class Engine:
         self._recon._loaded_category = {}
         self._recon._loaded_modules = framework.Framework._loaded_modules = {}
         
-        # Load any existing modules
+        # Load modules ONCE at startup - they are workspace-independent
         self._recon._load_modules()
         
         # Track loaded modules by workspace
@@ -104,8 +105,21 @@ class Engine:
             raise WorkspaceNotFoundError(f"Workspace '{workspace}' does not exist")
     
     def _init_workspace(self, workspace: str):
-        """Initialize the recon instance for a workspace"""
-        self._recon.start(self._Mode.JOB, workspace=workspace)
+        """
+        Initialize the recon instance for a workspace (lightweight).
+        
+        This only sets the workspace path and ensures the DB exists.
+        Modules are loaded once at server startup and shared across all workspaces.
+        """
+        path = os.path.join(self.spaces_path, workspace)
+        self._recon.workspace = self._framework.Framework.workspace = path
+        
+        # Ensure workspace directory and database exist
+        if not os.path.exists(path):
+            os.makedirs(path)
+            self._recon._create_db()
+        else:
+            self._recon._migrate_db()
     
     # =========================================================
     # Workspace Operations

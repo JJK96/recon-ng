@@ -160,7 +160,22 @@ class AsyncFramework(cmd.Cmd):
             pass
         
         elif event.type == EventType.EXCEPTION:
-            self.print_exception()
+            # Display exception from server
+            exc_type = data.get('type', 'Exception')
+            exc_message = data.get('message', 'Unknown error')
+            exc_traceback = data.get('traceback', '')
+            
+            verbosity = self._global_options.get('VERBOSITY', 1)
+            if verbosity == 0:
+                pass  # Silent mode
+            elif verbosity == 1:
+                # Show concise error message
+                self.error(f"{exc_type}: {exc_message}")
+            else:
+                # Show full traceback for verbosity >= 2
+                print(f"{Colors.R}{'-'*60}")
+                print(exc_traceback)
+                print(f"{'-'*60}{Colors.N}")
 
     #==================================================
     # CMD OVERRIDE METHODS
@@ -800,8 +815,15 @@ class AsyncFramework(cmd.Cmd):
     async def _do_db_schema(self, params):
         '''Displays the database schema'''
         tables = await self._get_tables()
-        for table in tables:
-            result = await self._call(Commands.DB_SCHEMA, {'table': table})
+        
+        # Fetch all schemas in parallel
+        results = await asyncio.gather(*[
+            self._call(Commands.DB_SCHEMA, {'table': table})
+            for table in tables
+        ])
+        
+        # Display results in order
+        for table, result in zip(tables, results):
             columns = [(c['name'], c['type']) for c in result.get('columns', [])]
             self.table(columns, title=table)
 

@@ -60,6 +60,9 @@ class RPCConsumer:
         self._active_contexts: Dict[str, RequestContext] = {}
         self._contexts_lock = asyncio.Lock()
         
+        # Cache for declared client queues to avoid re-declaring on every publish
+        self._declared_queues: set = set()
+        
         # Dispatcher will be created when we connect (need the event loop)
         self.dispatcher: Optional[Dispatcher] = None
     
@@ -98,12 +101,14 @@ class RPCConsumer:
             logger.error("Cannot publish: channel not connected")
             return
         
-        # Declare the queue if it doesn't exist (for dynamic client queues)
-        await self._channel.declare_queue(
-            queue,
-            durable=False,  # Client queues are transient
-            auto_delete=True  # Delete when client disconnects
-        )
+        # Declare the queue only if we haven't seen it before
+        if queue not in self._declared_queues:
+            await self._channel.declare_queue(
+                queue,
+                durable=False,  # Client queues are transient
+                auto_delete=True  # Delete when client disconnects
+            )
+            self._declared_queues.add(queue)
         
         await self._channel.default_exchange.publish(
             Message(
@@ -129,9 +134,12 @@ class RPCConsumer:
                     await self._handle_input_response(request)
                     return
                 
-                # Track context for commands that might need input
+                # Check if handler requires execution context (e.g., module runs)
                 handler = self.dispatcher.get_handler(request.command)
-                if handler and handler.requires_context:
+                requires_context = handler and handler.requires_context
+                
+                if requires_context:
+                    # Track context for commands that might need input
                     ctx = RequestContext(
                         request_id=request.id,
                         client_id=request.client_id,
@@ -142,20 +150,22 @@ class RPCConsumer:
                     )
                     async with self._contexts_lock:
                         self._active_contexts[request.id] = ctx
-                
-                try:
-                    # Dispatch the request in a thread pool to avoid blocking the event loop.
-                    # This is necessary because module execution is synchronous but needs
-                    # to publish events asynchronously via run_coroutine_threadsafe.
-                    response = await self._loop.run_in_executor(
-                        None,  # Use default ThreadPoolExecutor
-                        self.dispatcher.dispatch,
-                        request
-                    )
-                finally:
-                    # Clean up context tracking
-                    async with self._contexts_lock:
-                        self._active_contexts.pop(request.id, None)
+                    
+                    try:
+                        # Dispatch in thread pool for handlers that need context
+                        # (module execution is synchronous but needs async event publishing)
+                        response = await self._loop.run_in_executor(
+                            None,  # Use default ThreadPoolExecutor
+                            self.dispatcher.dispatch,
+                            request
+                        )
+                    finally:
+                        # Clean up context tracking
+                        async with self._contexts_lock:
+                            self._active_contexts.pop(request.id, None)
+                else:
+                    # Simple handlers can run directly without thread pool overhead
+                    response = self.dispatcher.dispatch(request)
                 
                 # Send response to client
                 response_queue = Queues.responses(request.client_id)
@@ -219,7 +229,8 @@ class RPCConsumer:
             async for message in queue_iter:
                 if not self._consuming:
                     break
-                await self._on_request(message)
+                # Process messages concurrently by spawning tasks
+                asyncio.create_task(self._on_request(message))
     
     async def stop_consuming(self):
         """Stop consuming messages"""
