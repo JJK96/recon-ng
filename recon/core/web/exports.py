@@ -1,37 +1,49 @@
-from dicttoxml import dicttoxml
-from flask import current_app, Response, jsonify, send_file, stream_with_context
-from io import StringIO
-from io import BytesIO
-from recon.core.web.utils import add_worksheet, is_url
+"""
+Export formatters for the Recon-ng web interface.
+
+Each export function takes a Sanic request and rows data, and returns
+an appropriate Sanic response.
+"""
 import os
+from io import BytesIO, StringIO
+
+from dicttoxml import dicttoxml
+from sanic.response import json as sanic_json, raw, ResponseStream
 import requests
 import unicodecsv as csv
 import xlsxwriter
 
-def _jsonify(rows):
-    return jsonify(rows=[dict(r) for r in rows])
+from recon.core.web.utils import add_worksheet, is_url
 
-def csvify(rows):
-    '''Expects a list of dictionaries and returns a CSV response.'''
+
+async def jsonify(request, rows):
+    """Returns rows as JSON response."""
+    return sanic_json({'rows': [dict(r) for r in rows]})
+
+
+async def csvify(request, rows):
+    """Expects a list of dictionaries and returns a CSV response."""
     if not rows:
-        csv_str = ''
+        csv_bytes = b''
     else:
         s = BytesIO()
         keys = rows[0].keys()
         dw = csv.DictWriter(s, keys)
         dw.writeheader()
         dw.writerows([dict(r) for r in rows])
-        csv_str = s.getvalue()
-    return Response(csv_str, mimetype='text/csv')
+        csv_bytes = s.getvalue()
+    return raw(csv_bytes, content_type='text/csv')
 
-def xmlify(rows):
-    '''Expects a list of dictionaries and returns a XML response.'''
+
+async def xmlify(request, rows):
+    """Expects a list of dictionaries and returns an XML response."""
     xml = dicttoxml([dict(r) for r in rows])
-    return Response(xml, mimetype='text/xml')
+    return raw(xml, content_type='text/xml')
 
-def listify(rows):
-    '''Expects a list of dictionaries and returns a continuous list of
-    values from all of the provided columns.'''
+
+async def listify(request, rows):
+    """Expects a list of dictionaries and returns a continuous list of
+    values from all of the provided columns."""
     columns = {}
     for row in rows:
         for column in row.keys():
@@ -40,40 +52,49 @@ def listify(rows):
             columns[column].append(row[column])
     s = StringIO()
     for column in columns:
-        s.write('# '+column+os.linesep)
+        s.write('# ' + column + os.linesep)
         for value in columns[column]:
             if type(value) != str:
                 value = str(value)
-            s.write(value+os.linesep)
+            s.write(value + os.linesep)
     list_str = s.getvalue()
-    return Response(list_str, mimetype='text/plain')
+    return raw(list_str.encode('utf-8'), content_type='text/plain')
 
-def xlsxify(rows):
-    '''Expects a list of dictionaries and returns an xlsx response.'''
+
+async def xlsxify(request, rows):
+    """Expects a list of dictionaries and returns an xlsx response."""
     sfp = BytesIO()
     with xlsxwriter.Workbook(sfp) as workbook:
-        # create a single worksheet for the provided rows
+        # Create a single worksheet for the provided rows
         add_worksheet(workbook, 'worksheet', rows)
     sfp.seek(0)
-    return send_file(
-        sfp,
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        as_attachment=True,
-        attachment_filename=f"export.xlsx"
+    
+    return raw(
+        sfp.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={
+            'Content-Disposition': 'attachment; filename="export.xlsx"'
+        }
     )
 
-# http://flask.pocoo.org/docs/0.12/patterns/streaming/
-def proxify(rows):
-    @stream_with_context
-    def generate():
-        '''Expects a list of dictionaries containing URLs and requests them
-        through a configured proxy.'''
-        # don't bother setting up if there's nothing to process
+
+async def proxify(request, rows):
+    """Expects a list of dictionaries containing URLs and requests them
+    through a configured proxy. Returns a streaming response."""
+    
+    async def generate(response):
+        """Async generator for streaming proxy results."""
+        # Don't bother setting up if there's nothing to process
         if not rows:
-            yield 'Nothing to send to proxy.'
-        # disable TLS validation warning
-        requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
-        # set static request options
+            await response.write('Nothing to send to proxy.\n')
+            return
+        
+        # Disable TLS validation warning
+        requests.packages.urllib3.disable_warnings(
+            requests.packages.urllib3.exceptions.InsecureRequestWarning
+        )
+        
+        # Set static request options
         kwargs = {
             'headers': {
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.95 Safari/537.36',
@@ -85,7 +106,8 @@ def proxify(rows):
             'allow_redirects': False,
             'verify': False,
         }
-        # process the rows
+        
+        # Process the rows
         for row in [dict(r) for r in rows]:
             for key in row:
                 url = row[key]
@@ -98,6 +120,7 @@ def proxify(rows):
                         msg += str(e)
                 else:
                     msg += 'Error: Failed URL validation.'
-                msg += os.linesep*2
-                yield msg
-    return Response(generate(), mimetype='text/plain')
+                msg += os.linesep * 2
+                await response.write(msg)
+    
+    return ResponseStream(generate, content_type='text/plain')

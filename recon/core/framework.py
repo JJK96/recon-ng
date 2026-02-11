@@ -23,11 +23,27 @@ class FrameworkException(Exception):
         Exception.__init__(self, message)
 
 class Colors(object):
-    N = '\033[m' # native
+    """
+    ANSI color codes for terminal output.
+    
+    For use in prompts with readline, use the RL_* variants which wrap
+    escape sequences in \\001 and \\002 markers so readline can correctly
+    calculate prompt width.
+    """
+    N = '\033[m' # native/reset
     R = '\033[31m' # red
     G = '\033[32m' # green
     O = '\033[33m' # orange
     B = '\033[34m' # blue
+    P = '\033[35m' # purple/magenta
+    
+    # Readline-safe versions (for use in prompts)
+    RL_N = '\001\033[m\002'
+    RL_R = '\001\033[31m\002'
+    RL_G = '\001\033[32m\002'
+    RL_O = '\001\033[33m\002'
+    RL_B = '\001\033[34m\002'
+    RL_P = '\001\033[35m\002'
 
 class Options(dict):
 

@@ -1,33 +1,74 @@
-version: '3.7'
-
 services:
 
-    web:
-        build: .
-        image: recon-ng
-        container_name: recon-ng
+    # RabbitMQ message broker
+    rabbitmq:
+        image: rabbitmq:3-management-alpine
+        container_name: recon-rabbitmq
         ports:
-            - '5000:5000'
-        command: python3 ./recon-web --host 0.0.0.0
+            - '5672:5672'    # AMQP
+            - '15672:15672'  # Management UI
+        environment:
+            RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-recon}
+            RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-recon}
+        volumes:
+            - rabbitmq_data:/var/lib/rabbitmq
+        healthcheck:
+            test: rabbitmq-diagnostics -q ping
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        networks:
+            - recon-net
+
+    # RPC Server - handles all recon-ng operations
+    server:
+        build:
+            context: .
+            dockerfile: Dockerfile
+            target: server
+        image: recon-ng-server
+        container_name: recon-server
         volumes:
             - .:/recon-ng
-            - ~/.recon-ng:/root/.recon-ng
+            - ${RECON_DATA:-recon_data}:/root/.recon-ng
         environment:
-            - REDIS_URL=redis://redis:6379/0
+            AMQP_URL: ${AMQP_URL:-amqp://recon:recon@rabbitmq:5672/}
+            RECON_HOME: /root/.recon-ng
+            DEBUG: "true"
         depends_on:
-            - redis
+            rabbitmq:
+                condition: service_healthy
+        restart: unless-stopped
+        networks:
+            - recon-net
 
-    worker:
-        image: recon-ng
-        command: rq worker -u redis://redis:6379/0 recon-tasks
+    # Web API server (Sanic + python-socketio via uvicorn)
+    web:
+        build:
+            context: .
+            dockerfile: Dockerfile
+            target: web
+        image: recon-ng-web
+        container_name: recon-web
+        ports:
+            - '${WEB_PORT:-5000}:5000'
         volumes:
             - .:/recon-ng
-            - ~/.recon-ng:/root/.recon-ng
+            - recon_data:/root/.recon-ng
         environment:
-            - REDIS_URL=redis://redis:6379/0
+            AMQP_URL: ${AMQP_URL:-amqp://recon:recon@rabbitmq:5672/}
+            RECON_HOME: /root/.recon-ng
         depends_on:
-            - redis
-            - web
+            - server
+            - rabbitmq
+        restart: unless-stopped
+        networks:
+            - recon-net
 
-    redis:
-        image: redis
+networks:
+    recon-net:
+        driver: bridge
+
+volumes:
+    rabbitmq_data:
+    recon_data:

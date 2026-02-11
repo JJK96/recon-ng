@@ -1,14 +1,34 @@
 #!/usr/bin/env python3
+"""
+Recon-ng Web Server
 
-from recon.core.web import create_app
+This script starts the Sanic + python-socketio web server that provides both
+REST API and WebSocket endpoints for the recon-ng web interface.
+
+The web server communicates with the recon-ng RPC server via RabbitMQ.
+"""
 import argparse
+import uvicorn
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--host', default='127.0.0.1', help="IP address to listen on")
-parser.add_argument('--port', default=5000, help="port to bind the web server to")
+parser = argparse.ArgumentParser(description='Recon-ng Web Server')
+parser.add_argument('--host', default='0.0.0.0', help="IP address to listen on (default: 0.0.0.0)")
+parser.add_argument('--port', default=5000, type=int, help="Port to bind the web server to (default: 5000)")
+parser.add_argument('--debug', action='store_true', help="Enable debug mode")
+parser.add_argument('--reload', action='store_true', help="Enable auto-reload on code changes")
 
 args = parser.parse_args()
 
-app = create_app()
 if __name__ == '__main__':
-    app.run(host=args.host, port=args.port)
+    print(f" * Starting web server on http://{args.host}:{args.port}")
+    print(" * WebSocket support enabled")
+    print(" * Press Ctrl+C to quit")
+    
+    # Run the ASGI app (Sanic + python-socketio combined)
+    # We use the asgi_app which wraps both Sanic and SocketIO
+    uvicorn.run(
+        "recon.core.web:asgi_app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload or args.debug,
+        log_level="debug" if args.debug else "info",
+    )

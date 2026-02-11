@@ -373,6 +373,11 @@ class Recon(framework.Framework):
 
     def _fetch_module_index(self):
         if self._marketplace:
+            path = os.path.join(self.home_path, 'modules.yml')
+            # Skip fetching if file already exists
+            if os.path.exists(path):
+                self.debug('Module index file already exists, skipping fetch.')
+                return
             content = '[]'
             self.debug('Fetching index file...')
             try:
@@ -382,7 +387,6 @@ class Recon(framework.Framework):
                 #self.print_exception()
                 return
             content = resp.text
-            path = os.path.join(self.home_path, 'modules.yml')
             self._write_local_file(path, content)
         else:
             self.alert('Marketplace disabled.')
@@ -404,7 +408,10 @@ class Recon(framework.Framework):
                 elif module['path'] in self._loaded_modules.keys():
                     status = 'installed'
                     loaded = self._loaded_modules[module['path']]
-                    if loaded.meta['version'] != module['version']:
+                    # Handle modules that may be missing version in index
+                    module_version = module.get('version')
+                    loaded_version = loaded.meta.get('version')
+                    if module_version and loaded_version and loaded_version != module_version:
                         status = 'outdated'
                 module['status'] = status
 

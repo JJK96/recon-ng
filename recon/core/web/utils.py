@@ -1,7 +1,6 @@
-from flask import g, current_app
-from sqlite3 import dbapi2 as sqlite3
 import os
 import re
+from sqlite3 import dbapi2 as sqlite3
 
 def columnize(columns, rows):
     return [{columns[i]: row[i] for i in range(0, len(columns))} for row in rows]
