@@ -13,6 +13,7 @@ class EventType:
     HEADING = 'heading'
     PROGRESS = 'progress'
     INPUT_REQUIRED = 'input_required'
+    FILE_REQUIRED = 'file_required'
     FILE_OUTPUT = 'file_output'
     EXCEPTION = 'exception'
 
@@ -92,6 +93,9 @@ class Commands:
     
     # Input response
     INPUT_RESPONSE = 'input/response'
+    
+    # File response
+    FILE_RESPONSE = 'file/response'
     
     # Snapshots
     SNAPSHOTS_LIST = 'snapshots/list'

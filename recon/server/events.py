@@ -5,7 +5,6 @@ import asyncio
 import json
 import logging
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
-from threading import Lock
 
 from recon.shared.constants import EventType, Queues
 from recon.shared.schemas import RPCEvent
@@ -38,7 +37,6 @@ class EventPublisher:
         self.request_id = request_id
         self._publish_func = publish_func
         self._loop = loop
-        self._lock = Lock()
     
     def _emit(self, event_type: str, data: Dict[str, Any]):
         """Emit an event to the client"""
@@ -52,32 +50,30 @@ class EventPublisher:
         
         logger.debug(f"Emitting event {event_type} to queue {queue}")
         
-        with self._lock:
-            try:
-                result = self._publish_func(queue, message)
-                # If the publish function returns a coroutine, schedule it
-                if asyncio.iscoroutine(result):
-                    logger.debug(f"Got coroutine from publish_func, loop={self._loop}, running={self._loop.is_running() if self._loop else 'N/A'}")
-                    if self._loop and self._loop.is_running():
-                        future = asyncio.run_coroutine_threadsafe(result, self._loop)
-                        try:
-                            # Wait for publish to complete (with timeout)
-                            future.result(timeout=5.0)
-                            logger.debug(f"Event {event_type} published successfully")
-                        except Exception as e:
-                            logger.error(f"Failed to publish event: {type(e).__name__}: {e}")
-                            import traceback
-                            logger.error(traceback.format_exc())
-                    else:
-                        # No running loop, try to run directly
-                        try:
-                            asyncio.get_event_loop().run_until_complete(result)
-                        except Exception as e:
-                            logger.error(f"Failed to publish event (no loop): {type(e).__name__}: {e}")
-            except Exception as e:
-                logger.error(f"Exception in _emit: {type(e).__name__}: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
+        try:
+            result = self._publish_func(queue, message)
+            # If the publish function returns a coroutine, schedule it
+            if asyncio.iscoroutine(result):
+                logger.debug(f"Got coroutine from publish_func, loop={self._loop}, running={self._loop.is_running() if self._loop else 'N/A'}")
+                if self._loop and self._loop.is_running():
+                    # Schedule the coroutine on the event loop
+                    future = asyncio.run_coroutine_threadsafe(result, self._loop)
+                    try:
+                        # Wait for publish to complete (with timeout)
+                        # Note: We don't hold the lock during this wait to avoid
+                        # blocking other threads that may want to publish events
+                        future.result(timeout=5.0)
+                        logger.debug(f"Event {event_type} published successfully")
+                    except Exception as e:
+                        logger.error(f"Failed to publish event: {type(e).__name__}: {e}")
+                else:
+                    # No running loop, try to run directly
+                    try:
+                        asyncio.get_event_loop().run_until_complete(result)
+                    except Exception as e:
+                        logger.error(f"Failed to publish event (no loop): {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"Exception in _emit: {type(e).__name__}: {e}")
     
     # Output methods - these mirror the Framework output methods
     def output(self, message: str, level: str = 'info'):
@@ -125,6 +121,13 @@ class EventPublisher:
         self._emit(EventType.INPUT_REQUIRED, {
             'input_id': input_id,
             'prompt': prompt
+        })
+    
+    def file_required(self, file_id: str, filepath: str):
+        """Request file content from client"""
+        self._emit(EventType.FILE_REQUIRED, {
+            'file_id': file_id,
+            'filepath': filepath
         })
     
     def file_output(self, filename: str, content: str, encoding: str = 'utf-8', binary: bool = False):

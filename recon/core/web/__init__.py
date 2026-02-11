@@ -24,6 +24,7 @@ from typing import Dict, Optional, Any
 from sanic import Sanic
 from sanic.response import html
 from sanic_ext import Extend
+from jinja2 import Environment, FileSystemLoader
 import socketio
 
 from recon.core.constants import BANNER_WEB
@@ -42,6 +43,44 @@ AMQP_URL = os.environ.get('AMQP_URL', 'amqp://recon:recon@localhost:5672/')
 # Global workspace state
 _workspace = os.environ.get('WORKSPACE', 'default')
 print(f" * Workspace initialized: {_workspace}")
+
+# Configure Jinja2 templates directory
+TEMPLATES_DIR = Path(__file__).parent / 'templates'
+jinja_env = Environment(
+    loader=FileSystemLoader(str(TEMPLATES_DIR)),
+    autoescape=True
+)
+
+
+def url_for(name: str, **kwargs) -> str:
+    """
+    Generate URL for a named route or static file.
+    Mimics Flask/Sanic url_for behavior for templates.
+    """
+    if name == 'static':
+        filename = kwargs.get('filename', '')
+        return f'/static/{filename}'
+    elif name == 'index':
+        return '/'
+    else:
+        # For other routes, just return the name as a path
+        return f'/{name}'
+
+
+# Add url_for to Jinja2 globals
+jinja_env.globals['url_for'] = url_for
+
+# Global workspace state
+_workspace = os.environ.get('WORKSPACE', 'default')
+print(f" * Workspace initialized: {_workspace}")
+
+
+def render_template(template_name: str, **context) -> html:
+    """Render a Jinja2 template and return a Sanic HTML response"""
+    # Add config object with current workspace for templates
+    context.setdefault('config', type('Config', (), {'WORKSPACE': _workspace})())
+    template = jinja_env.get_template(template_name)
+    return html(template.render(**context))
 
 
 def get_workspace() -> str:
@@ -139,12 +178,8 @@ app.config.OAS = True  # Enable OpenAPI
 app.config.OAS_UI_DEFAULT = "swagger"
 app.config.OAS_URL_PREFIX = "/api/docs"
 
-# Initialize sanic-ext (provides Jinja2 templating and OpenAPI)
+# Initialize sanic-ext (provides OpenAPI)
 Extend(app)
-
-# Configure templates directory
-TEMPLATES_DIR = Path(__file__).parent / 'templates'
-app.ext.config.TEMPLATING_PATH_TO_TEMPLATES = str(TEMPLATES_DIR)
 
 # Serve static files from /static URL path, mapped to ./static directory
 STATIC_DIR = Path(__file__).parent / 'static'
@@ -206,10 +241,7 @@ async def index(request):
         logger.error(f"Failed to get workspaces: {e}")
         workspaces = []
     
-    return await request.app.ext.render(
-        'index.html',
-        context={'workspaces': workspaces}
-    )
+    return render_template('index.html', workspaces=workspaces)
 
 
 # =============================================================================

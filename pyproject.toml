@@ -59,6 +59,7 @@ web = [
     "XlsxWriter",
     "unicodecsv",
     "uvicorn>=0.24.0",
+    "jinja2>=3.0.0",
 ]
 
 # All dependencies

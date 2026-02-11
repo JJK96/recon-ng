@@ -151,7 +151,7 @@ class ModuleContext(AsyncFramework):
                 global_options=dict(self._global_options),
                 timeout=600.0
             ):
-                self._handle_event(event)
+                await self._handle_event(event)
         except RPCClientError:
             pass
         except KeyboardInterrupt:

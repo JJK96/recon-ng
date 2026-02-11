@@ -134,6 +134,11 @@ class RPCConsumer:
                     await self._handle_input_response(request)
                     return
                 
+                # Handle file/response specially
+                if request.command == Commands.FILE_RESPONSE:
+                    await self._handle_file_response(request)
+                    return
+                
                 # Check if handler requires execution context (e.g., module runs)
                 handler = self.dispatcher.get_handler(request.command)
                 requires_context = handler and handler.requires_context
@@ -154,10 +159,12 @@ class RPCConsumer:
                     try:
                         # Dispatch in thread pool for handlers that need context
                         # (module execution is synchronous but needs async event publishing)
+                        # Pass the context we created so dispatcher uses the same one
                         response = await self._loop.run_in_executor(
                             None,  # Use default ThreadPoolExecutor
                             self.dispatcher.dispatch,
-                            request
+                            request,
+                            ctx  # Pass context to dispatcher
                         )
                     finally:
                         # Clean up context tracking
@@ -173,9 +180,10 @@ class RPCConsumer:
                 await self._publish_message(response_queue, response_json)
                 
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse request JSON: {e}")
-                # Message will be nacked by context manager on exception
-                raise
+                # Malformed messages should NOT be retried - log and discard
+                logger.error(f"Failed to parse request JSON (discarding): {e}")
+                # Don't re-raise - the message.process() context manager will ack
+                # the message since we didn't raise an exception
                 
             except Exception as e:
                 logger.exception(f"Error processing request: {e}")
@@ -193,7 +201,8 @@ class RPCConsumer:
                 except Exception:
                     pass
                 
-                raise
+                # Don't re-raise for most errors - we've sent an error response
+                # Only re-raise for truly unrecoverable infrastructure errors
     
     async def _handle_input_response(self, request: RPCRequest):
         """
@@ -209,12 +218,36 @@ class RPCConsumer:
             return
         
         # Find the context that's waiting for this input
-        # The input_id contains enough info to route, but we need to find
-        # the right context. We'll search through active contexts.
+        # Check each active context to see if it has this pending input_id
         async with self._contexts_lock:
             for ctx in self._active_contexts.values():
-                ctx.provide_input(input_id, value)
-                break  # Input ID is unique, so stop after first match
+                if ctx.has_pending_input(input_id):
+                    ctx.provide_input(input_id, value)
+                    return
+            logger.warning(f"No context found waiting for input_id: {input_id}")
+    
+    async def _handle_file_response(self, request: RPCRequest):
+        """
+        Handle a file/response command.
+        
+        This finds the waiting context and provides the file content.
+        """
+        file_id = request.params.get('file_id')
+        content = request.params.get('content')
+        error = request.params.get('error')
+        
+        if not file_id:
+            logger.warning("file/response missing file_id")
+            return
+        
+        # Find the context that's waiting for this file
+        # Check each active context to see if it has this pending file_id
+        async with self._contexts_lock:
+            for ctx in self._active_contexts.values():
+                if ctx.has_pending_file(file_id):
+                    ctx.provide_file(file_id, content, error)
+                    return
+            logger.warning(f"No context found waiting for file_id: {file_id}")
     
     async def start_consuming(self):
         """Start consuming messages from the requests queue"""

@@ -108,9 +108,9 @@ class AsyncFramework(cmd.Cmd):
             global_options=dict(self._global_options),
             timeout=timeout
         ):
-            self._handle_event(event)
+            await self._handle_event(event)
     
-    def _handle_event(self, event: RPCEvent):
+    async def _handle_event(self, event: RPCEvent):
         """Handle an event from the server during streaming operations."""
         data = event.data or {}
         
@@ -159,6 +159,13 @@ class AsyncFramework(cmd.Cmd):
             # Handle input prompt from server - this is handled by rpc client
             pass
         
+        elif event.type == EventType.FILE_REQUIRED:
+            # Handle file request from server
+            file_id = data.get('file_id')
+            filepath = data.get('filepath')
+            if file_id and filepath:
+                await self._handle_file_request(file_id, filepath)
+        
         elif event.type == EventType.EXCEPTION:
             # Display exception from server
             exc_type = data.get('type', 'Exception')
@@ -176,6 +183,30 @@ class AsyncFramework(cmd.Cmd):
                 print(f"{Colors.R}{'-'*60}")
                 print(exc_traceback)
                 print(f"{'-'*60}{Colors.N}")
+
+    async def _handle_file_request(self, file_id: str, filepath: str):
+        """Handle server request for file content."""
+        try:
+            with open(filepath, 'r') as f:
+                content = f.read()
+            # Use send_notification - no response expected
+            await self.rpc.send_notification(
+                Commands.FILE_RESPONSE,
+                workspace=self.workspace,
+                params={'file_id': file_id, 'content': content}
+            )
+        except FileNotFoundError:
+            await self.rpc.send_notification(
+                Commands.FILE_RESPONSE,
+                workspace=self.workspace,
+                params={'file_id': file_id, 'content': None, 'error': f"File not found: {filepath}"}
+            )
+        except Exception as e:
+            await self.rpc.send_notification(
+                Commands.FILE_RESPONSE,
+                workspace=self.workspace,
+                params={'file_id': file_id, 'content': None, 'error': str(e)}
+            )
 
     #==================================================
     # CMD OVERRIDE METHODS

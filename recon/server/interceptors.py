@@ -191,6 +191,21 @@ def intercepted_open(filepath, mode='r', *args, **kwargs):
         # (in workspace directory or explicitly marked)
         return InterceptedFile(filepath, mode, ctx, **kwargs)
     
+    # For read operations, check if file exists on server first
+    if 'r' in mode and isinstance(filepath, str):
+        if not os.path.exists(filepath):
+            # File doesn't exist on server - request from client
+            logger.debug(f"File not found on server, requesting from client: {filepath}")
+            content = ctx.request_file(filepath)
+            if content is not None:
+                import io
+                logger.debug(f"Got file content from client: {len(content)} chars")
+                if 'b' in mode:
+                    return io.BytesIO(content.encode('utf-8'))
+                return io.StringIO(content)
+            # Client couldn't provide file either - raise original error
+            raise FileNotFoundError(f"[Errno 2] No such file or directory: '{filepath}'")
+    
     # Default: use original open
     return _original_open(filepath, mode, *args, **kwargs)
 

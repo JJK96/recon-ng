@@ -134,12 +134,13 @@ class Dispatcher:
         """Get the handler for a command"""
         return self._handlers.get(command)
     
-    def dispatch(self, request: RPCRequest) -> RPCResponse:
+    def dispatch(self, request: RPCRequest, ctx: RequestContext = None) -> RPCResponse:
         """
         Dispatch an RPC request to the appropriate handler.
         
         Args:
             request: The RPC request to dispatch
+            ctx: Optional pre-created RequestContext (for input handling)
             
         Returns:
             RPCResponse with the result or error
@@ -167,15 +168,16 @@ class Dispatcher:
             # Note: We do lazy validation - workspace existence is checked
             # when the handler actually needs it
         
-        # Create context
-        ctx = RequestContext(
-            request_id=request.id,
-            client_id=request.client_id,
-            workspace=request.workspace,
-            global_options=request.global_options,
-            publish_func=self.publish_func,
-            loop=self.loop
-        )
+        # Create context only if not provided
+        if ctx is None:
+            ctx = RequestContext(
+                request_id=request.id,
+                client_id=request.client_id,
+                workspace=request.workspace,
+                global_options=request.global_options,
+                publish_func=self.publish_func,
+                loop=self.loop
+            )
         
         try:
             # Call the handler

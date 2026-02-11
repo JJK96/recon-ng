@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from typing import Any, Callable, Dict, Optional
 
@@ -179,6 +180,11 @@ class CLIRPCClient:
         """Close the connection"""
         self._consuming = False
         self._connected = False
+        
+        # Cancel all pending futures to avoid hanging coroutines
+        for request_id, future in list(self._pending.items()):
+            if not future.done():
+                future.cancel()
         self._pending.clear()
         self._event_callbacks.clear()
         
@@ -263,6 +269,38 @@ class CLIRPCClient:
             self._pending.pop(request.id, None)
             self._event_callbacks.pop(request.id, None)
     
+    async def send_notification(
+        self,
+        command: str,
+        workspace: str = 'default',
+        params: Dict[str, Any] = None
+    ) -> None:
+        """
+        Send a notification/command without waiting for a response.
+        
+        This is used for one-way messages like FILE_RESPONSE where
+        no reply is expected.
+        """
+        await self.connect()
+        
+        # Create request
+        request = RPCRequest(
+            client_id=self.client_id,
+            command=command,
+            workspace=workspace,
+            params=params or {},
+            global_options={}
+        )
+        
+        # Publish without waiting for response
+        await self._channel.default_exchange.publish(
+            Message(
+                body=request.model_dump_json().encode('utf-8'),
+                content_type='application/json'
+            ),
+            routing_key=Queues.RPC_REQUESTS
+        )
+    
     def call_with_events(
         self,
         command: str,
@@ -331,6 +369,7 @@ class EventStreamingCall:
         self._response_future: Optional[asyncio.Future] = None
         self._started = False
         self._cleanup_done = False
+        self._start_time: Optional[float] = None
         self.result: Optional[Dict[str, Any]] = None
         self.error: Optional[RPCClientError] = None
     
@@ -341,27 +380,30 @@ class EventStreamingCall:
         if not self._started:
             await self._start()
         
-        # Check if we have a response (meaning we're done)
-        if self._response_future.done():
-            # Drain any remaining events
-            try:
-                return self._event_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                # Process the response and clean up
+        # Use a while loop instead of recursion to avoid stack overflow on long operations
+        while True:
+            # Check for timeout
+            if self._start_time and (time.time() - self._start_time) > self.timeout:
                 await self._finish()
-                raise StopAsyncIteration
-        
-        # Wait for either an event or the response
-        try:
-            # Use a short timeout to check response periodically
-            event = await asyncio.wait_for(self._event_queue.get(), timeout=0.1)
-            return event
-        except asyncio.TimeoutError:
-            # Check if response arrived
+                raise RPCTimeoutError(f"Request timed out after {self.timeout}s")
+            # Check if we have a response (meaning we're done)
             if self._response_future.done():
-                return await self.__anext__()
-            # Continue waiting
-            return await self.__anext__()
+                # Drain any remaining events
+                try:
+                    return self._event_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    # Process the response and clean up
+                    await self._finish()
+                    raise StopAsyncIteration
+            
+            # Wait for either an event or the response
+            try:
+                # Use a short timeout to check response periodically
+                event = await asyncio.wait_for(self._event_queue.get(), timeout=0.1)
+                return event
+            except asyncio.TimeoutError:
+                # Continue the loop to check for response or wait for more events
+                continue
     
     async def _start(self):
         """Start the RPC call"""
@@ -398,6 +440,7 @@ class EventStreamingCall:
         )
         
         self._started = True
+        self._start_time = time.time()
     
     async def _finish(self):
         """Process the response and clean up"""
