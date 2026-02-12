@@ -1,0 +1,18 @@
+# Test dependencies for recon-ng
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+pytest-timeout>=2.1.0
+responses>=0.22.0
+freezegun>=1.2.0
+
+# Optional: Flask dependencies for web/API tests
+# Install these to run the full test suite including web tests
+flask
+flask-restful
+flasgger
+dicttoxml
+XlsxWriter
+unicodecsv
+rq
+redis
