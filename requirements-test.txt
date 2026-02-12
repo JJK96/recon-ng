@@ -6,13 +6,18 @@ pytest-timeout>=2.1.0
 responses>=0.22.0
 freezegun>=1.2.0
 
-# Optional: Flask dependencies for web/API tests
+# Optional: Web/API test dependencies
 # Install these to run the full test suite including web tests
-flask
-flask-restful
-flasgger
+sanic>=23.0.0
+sanic-ext>=23.0.0
+sanic-testing>=23.0.0
 dicttoxml
 XlsxWriter
 unicodecsv
-rq
-redis
+
+# Legacy Flask dependencies (kept for reference, may be removed)
+# flask
+# flask-restful
+# flasgger
+# rq
+# redis

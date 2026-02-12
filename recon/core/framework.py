@@ -1,5 +1,16 @@
+"""
+Recon-ng Framework Core
+
+This module provides the core business logic for recon-ng, including:
+- Database operations (query, insert, etc.)
+- API key management
+- HTTP request handling
+- Module support utilities
+
+This module does NOT contain any CLI-specific code. CLI functionality
+is implemented in recon/client/.
+"""
 from contextlib import closing
-import cmd
 import codecs
 import inspect
 import json
@@ -7,12 +18,8 @@ import os
 import random
 import re
 import requests
-import socket
 import sqlite3
 import string
-import subprocess
-import sys
-import traceback
 
 #=================================================
 # SUPPORT CLASSES
@@ -114,8 +121,13 @@ class Options(dict):
 # FRAMEWORK CLASS
 #=================================================
 
-class Framework(cmd.Cmd):
-    prompt = '>>>'
+class Framework:
+    """
+    Core framework class providing business logic for recon-ng.
+    
+    This class is used by the server's Engine class. It does not inherit
+    from cmd.Cmd and contains no CLI-specific code.
+    """
     # mode flags
     _script = 0
     _load = 0
@@ -135,78 +147,11 @@ class Framework(cmd.Cmd):
     _summary_counts = {}
 
     def __init__(self, params):
-        cmd.Cmd.__init__(self)
         self._modulename = params
         self.ruler = '-'
         self.spacer = '  '
         self.time_format = '%Y-%m-%d %H:%M:%S'
-        self.nohelp = f"{Colors.R}[!] No help on %s{Colors.N}"
-        self.do_help.__func__.__doc__ = '''Displays this menu'''
-        self.doc_header = 'Commands (type [help|?] <topic>):'
         self._exit = 0
-
-    #==================================================
-    # CMD OVERRIDE METHODS
-    #==================================================
-
-    def default(self, line):
-        self.error(f"Invalid command: {line}")
-
-    def emptyline(self):
-        # disables running of last command when no command is given
-        # return flag to tell interpreter to continue
-        return 0
-
-    def precmd(self, line):
-        if Framework._load:
-            print('\r', end='')
-        if Framework._script:
-            print(f"{line}")
-        if Framework._record:
-            recorder = codecs.open(Framework._record, 'ab', encoding='utf-8')
-            recorder.write(f"{line}{os.linesep}")
-            recorder.flush()
-            recorder.close()
-        if Framework._spool:
-            Framework._spool.write(f"{self.prompt}{line}{os.linesep}")
-            Framework._spool.flush()
-        return line
-
-    def onecmd(self, line):
-        cmd, arg, line = self.parseline(line)
-        if not line:
-            return self.emptyline()
-        if line == 'EOF':
-            # reset stdin for raw_input
-            sys.stdin = sys.__stdin__
-            Framework._script = 0
-            Framework._load = 0
-            print('')
-            return
-        if cmd is None:
-            return self.default(line)
-        self.lastcmd = line
-        if cmd == '':
-            return self.default(line)
-        else:
-            try:
-                func = getattr(self, 'do_' + cmd)
-            except AttributeError:
-                return self.default(line)
-            try:
-                return func(arg)
-            except Exception:
-                self.print_exception()
-
-    # make help menu more attractive
-    def print_topics(self, header, cmds, cmdlen, maxcol):
-        if cmds:
-            self.stdout.write(f"{header}{os.linesep}")
-            if self.ruler:
-                self.stdout.write(f"{self.ruler * len(header)}{os.linesep}")
-            for cmd in cmds:
-                self.stdout.write(f"{cmd.ljust(15)} {getattr(self, 'do_' + cmd).__doc__}{os.linesep}")
-            self.stdout.write(os.linesep)
 
     #==================================================
     # SUPPORT METHODS
@@ -271,105 +216,131 @@ class Framework(cmd.Cmd):
 
     #==================================================
     # OUTPUT METHODS
+    # These methods check for a server execution context and route
+    # output through RPC events if available. Otherwise, they print
+    # directly (for CLI use or testing).
     #==================================================
 
-    def print_exception(self, line=''):
-        stack_list = [x.strip() for x in traceback.format_exc().strip().splitlines()]
-        exctype = stack_list[-1].split(':', 1)[0].strip()
-        message = stack_list[-1].split(':', 1)[-1].strip()
-        if self._global_options['verbosity'] == 0:
-            return
-        elif self._global_options['verbosity'] == 1:
-            line = ' '.join([x for x in [message, line] if x])
-            self.error(line)
-        elif self._global_options['verbosity'] == 2:
-            print(f"{Colors.R}{'-'*60}")
-            traceback.print_exc()
-            print(f"{'-'*60}{Colors.N}")
-
-    def error(self, line):
-        '''Formats and presents errors.'''
-        if not re.search('[.,;!?]$', line):
-            line += '.'
-        line = line[:1].upper() + line[1:]
-        print(f"{Colors.R}[!] {line}{Colors.N}")
-
-    def output(self, line):
-        '''Formats and presents normal output.'''
-        print(f"{Colors.B}[*]{Colors.N} {line}")
-
-    def alert(self, line):
-        '''Formats and presents important output.'''
-        print(f"{Colors.G}[*]{Colors.N} {line}")
+    def _get_event_publisher(self):
+        """Get the event publisher from execution context if available."""
+        try:
+            from recon.server.interceptors import get_current_context
+            ctx = get_current_context()
+            if ctx is not None:
+                return ctx.events
+        except ImportError:
+            pass
+        return None
 
     def verbose(self, line):
         '''Formats and presents output if in verbose mode.'''
-        if self._global_options['verbosity'] >= 1:
-            self.output(line)
+        if self._global_options.get('VERBOSITY', 1) >= 1:
+            events = self._get_event_publisher()
+            if events:
+                events.verbose(str(line))
+            else:
+                self.output(line)
 
     def debug(self, line):
         '''Formats and presents output if in debug mode (very verbose).'''
-        if self._global_options['verbosity'] >= 2:
-            self.output(line)
+        if self._global_options.get('VERBOSITY', 1) >= 2:
+            events = self._get_event_publisher()
+            if events:
+                events.debug(str(line))
+            else:
+                self.output(line)
+
+    def alert(self, line):
+        '''Formats and presents important output.'''
+        events = self._get_event_publisher()
+        if events:
+            events.alert(str(line))
+        else:
+            print(f"{Colors.G}[*]{Colors.N} {line}")
+
+    def error(self, line):
+        '''Formats and presents errors.'''
+        line = str(line)
+        if not re.search('[.,;!?]$', line):
+            line += '.'
+        line = line[:1].upper() + line[1:]
+        events = self._get_event_publisher()
+        if events:
+            events.error(line)
+        else:
+            print(f"{Colors.R}[!] {line}{Colors.N}")
+
+    def output(self, line):
+        '''Formats and presents normal output.'''
+        events = self._get_event_publisher()
+        if events:
+            events.output(str(line))
+        else:
+            print(f"{Colors.B}[*]{Colors.N} {line}")
 
     def heading(self, line, level=1):
-        '''Formats and presents styled header text'''
-        line = line
-        print('')
-        if level == 0:
-            print(self.ruler*len(line))
-            print(line.upper())
-            print(self.ruler*len(line))
-        if level == 1:
-            print(f"{self.spacer}{line.title()}")
-            print(f"{self.spacer}{self.ruler*len(line)}")
+        '''Formats and presents styled header text.'''
+        events = self._get_event_publisher()
+        if events:
+            events.heading(str(line), level)
+        else:
+            print('')
+            if level == 0:
+                print(self.ruler*len(line))
+                print(line.upper())
+                print(self.ruler*len(line))
+            if level == 1:
+                print(f"{self.spacer}{line.title()}")
+                print(f"{self.spacer}{self.ruler*len(line)}")
 
     def table(self, data, header=[], title=''):
         '''Accepts a list of rows and outputs a table.'''
-        tdata = list(data)
-        if header:
-            tdata.insert(0, header)
-        if len(set([len(x) for x in tdata])) > 1:
-            raise FrameworkException('Row lengths not consistent.')
-        lens = []
-        cols = len(tdata[0])
-        # create a list of max widths for each column
-        for i in range(0,cols):
-            lens.append(len(max([self.to_unicode_str(x[i]) if x[i] != None else '' for x in tdata], key=len)))
-        # calculate dynamic widths based on the title
-        title_len = len(title)
-        tdata_len = sum(lens) + (3*(cols-1))
-        diff = title_len - tdata_len
-        if diff > 0:
-            diff_per = diff / cols
-            lens = [x+diff_per for x in lens]
-            diff_mod = diff % cols
-            for x in range(0, diff_mod):
-                lens[x] += 1
-        # build ascii table
-        if len(tdata) > 0:
-            separator_str = f"{self.spacer}+-{'%s---'*(cols-1)}%s-+"
-            separator_sub = tuple(['-'*x for x in lens])
-            separator = separator_str % separator_sub
-            data_str = f"{self.spacer}| {'%s | '*(cols-1)}%s |"
-            # top of ascii table
-            print('')
-            print(separator)
-            # ascii table data
-            if title:
-                print(f"{self.spacer}| {title.center(tdata_len)} |")
-                print(separator)
+        events = self._get_event_publisher()
+        if events:
+            # Send structured data through events
+            events.table(list(data), header, title)
+        else:
+            # Local table formatting
+            tdata = list(data)
             if header:
-                rdata = tdata.pop(0)
-                data_sub = tuple([rdata[i].center(lens[i]) for i in range(0,cols)])
-                print(data_str % data_sub)
+                tdata.insert(0, header)
+            if not tdata:
+                return
+            if len(set([len(x) for x in tdata])) > 1:
+                raise FrameworkException('Row lengths not consistent.')
+            lens = []
+            cols = len(tdata[0])
+            for i in range(0, cols):
+                lens.append(len(max([self.to_unicode_str(x[i]) if x[i] != None else '' for x in tdata], key=len)))
+            title_len = len(title)
+            tdata_len = sum(lens) + (3*(cols-1))
+            diff = title_len - tdata_len
+            if diff > 0:
+                diff_per = diff / cols
+                lens = [x+diff_per for x in lens]
+                diff_mod = diff % cols
+                for x in range(0, diff_mod):
+                    lens[x] += 1
+            if len(tdata) > 0:
+                separator_str = f"{self.spacer}+-{'%s---'*(cols-1)}%s-+"
+                separator_sub = tuple(['-'*int(x) for x in lens])
+                separator = separator_str % separator_sub
+                data_str = f"{self.spacer}| {'%s | '*(cols-1)}%s |"
+                print('')
                 print(separator)
-            for rdata in tdata:
-                data_sub = tuple([self.to_unicode_str(rdata[i]).ljust(lens[i]) if rdata[i] != None else ''.ljust(lens[i]) for i in range(0,cols)])
-                print(data_str % data_sub)
-            # bottom of ascii table
-            print(separator)
-            print('')
+                if title:
+                    print(f"{self.spacer}| {title.center(tdata_len)} |")
+                    print(separator)
+                if header:
+                    rdata = tdata.pop(0)
+                    data_sub = tuple([rdata[i].center(int(lens[i])) for i in range(0, cols)])
+                    print(data_str % data_sub)
+                    print(separator)
+                for rdata in tdata:
+                    data_sub = tuple([self.to_unicode_str(rdata[i]).ljust(int(lens[i])) if rdata[i] != None else ''.ljust(int(lens[i])) for i in range(0, cols)])
+                    print(data_str % data_sub)
+                print(separator)
+                print('')
 
     #==================================================
     # DATABASE METHODS
@@ -414,6 +385,7 @@ class Framework(cmd.Cmd):
     #==================================================
 
     def _display(self, data, rowcount):
+        '''Displays insert results. Uses alert for new records, verbose for duplicates.'''
         display = self.alert if rowcount else self.verbose
         for key in sorted(data.keys()):
             display(f"{key.title()}: {data[key]}")
@@ -701,30 +673,6 @@ class Framework(cmd.Cmd):
                     raise FrameworkException(f"Value required for the '{option}' option.")
         return
 
-    def _list_options(self, options=None):
-        '''Lists options'''
-        if options is None:
-            options = self.options
-        if options:
-            pattern = f"{self.spacer}%s  %s  %s  %s"
-            key_len = len(max(options, key=len))
-            if key_len < 4: key_len = 4
-            val_len = len(max([self.to_unicode_str(options[x]) for x in options], key=len))
-            if val_len < 13: val_len = 13
-            print('')
-            print(pattern % ('Name'.ljust(key_len), 'Current Value'.ljust(val_len), 'Required', 'Description'))
-            print(pattern % (self.ruler*key_len, (self.ruler*13).ljust(val_len), self.ruler*8, self.ruler*11))
-            for key in sorted(options):
-                value = options[key] if options[key] != None else ''
-                reqd = 'no' if options.required[key] is False else 'yes'
-                desc = options.description[key]
-                print(pattern % (key.ljust(key_len), self.to_unicode_str(value).ljust(val_len), self.to_unicode_str(reqd).ljust(8), desc))
-            print('')
-        else:
-            print('')
-            print(f"{self.spacer}No options available for this module.")
-            print('')
-
     def _load_config(self):
         config_path = os.path.join(self.workspace, 'config.dat')
         # don't bother loading if a config file doesn't exist
@@ -802,37 +750,12 @@ class Framework(cmd.Cmd):
             result = [x for x in result if not x[0].endswith('_token')]
         return result
 
-    def _list_keys(self):
-        keys = self._query_keys('SELECT * FROM keys')
-        tdata = []
-        for key in sorted(keys):
-            tdata.append(key)
-        if tdata:
-            self.table(tdata, header=['Name', 'Value'])
-
     def _get_key_names(self):
         return [x[0] for x in self._query_keys('SELECT name FROM keys')]
 
     #==================================================
     # REQUEST METHODS
     #==================================================
-
-    def _print_prepared_request(self, prepared):
-        self.debug(f"{'='*25} REQUEST {'='*25}")
-        print(f"url:    {prepared.url}")
-        print(f"method: {prepared.method} {prepared.path_url}")
-        for k, v in prepared.headers.items():
-            print(f"header: {k}: {v}")
-        if prepared.body:
-            print(f"body: {prepared.body}")
-
-    def _print_response(self, resp):
-        self.debug(f"{'='*25} RESPONSE {'='*25}")
-        print(f"status: {resp.status_code} {resp.reason}")
-        for k, v in resp.headers.items():
-            print(f"header: {k}: {v}")
-        if resp.content:
-            print(f"body:   {resp.content}")
 
     def request(self, method, url, **kwargs):
         # process socket timeout
@@ -858,12 +781,6 @@ class Framework(cmd.Cmd):
         requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
         # send the request
         resp = getattr(requests, method.lower())(url, **kwargs)
-        if self._global_options['verbosity'] < 2:
-            return resp
-        # display request data
-        self._print_prepared_request(resp.request)
-        # display response data
-        self._print_response(resp)
         return resp
 
     #==================================================
@@ -876,630 +793,3 @@ class Framework(cmd.Cmd):
             return [params]
         # use the provided name as a keyword search and return the results
         return [x for x in Framework._loaded_modules if params in x]
-
-    def _list_modules(self, modules):
-        if modules:
-            key_len = len(max(modules, key=len)) + len(self.spacer)
-            last_category = ''
-            for module in sorted(modules):
-                category = module.split('/')[0]
-                if category != last_category:
-                    # print header
-                    last_category = category
-                    self.heading(last_category)
-                # print module
-                print(f"{self.spacer*2}{module}")
-        else:
-            print('')
-            self.alert('No modules enabled/installed.')
-        print('')
-
-    #==================================================
-    # SHOW METHODS
-    #==================================================
-
-    def _get_show_names(self):
-        # Any method beginning with "show_" will be parsed
-        # and added as a subcommand for the show command.
-        prefix = 'show_'
-        return [x[len(prefix):] for x in self.get_names() if x.startswith(prefix)]
-
-    #==================================================
-    # COMMAND METHODS
-    #==================================================
-
-    def _parse_subcommands(self, command):
-        subcommands = []
-        for method in dir(self):
-            if f"_do_{command}_" in method:
-                subcommands.append(method.split('_')[-1])
-        return subcommands
-
-    def _parse_params(self, params):
-        params = params.split()
-        arg = ''
-        if params:
-            arg = params.pop(0)
-        params = ' '.join(params)
-        return arg, params
-
-    def do_exit(self, params):
-        '''Exits the framework'''
-        self._exit = 1
-        return True
-
-    def do_back(self, params):
-        '''Exits the current context'''
-        return True
-
-    def do_options(self, params):
-        '''Manages the current context options'''
-        if not params:
-            self.help_options()
-            return
-        arg, params = self._parse_params(params)
-        if arg in self._parse_subcommands('options'):
-            return getattr(self, '_do_options_'+arg)(params)
-        else:
-            self.help_options()
-
-    def _do_options_list(self, params):
-        '''Shows the current context options'''
-        self._list_options()
-
-    def _do_options_set(self, params):
-        '''Sets a current context option'''
-        option, value = self._parse_params(params)
-        if not (option and value):
-            self._help_options_set()
-            return
-        name = option.upper()
-        if name in self.options:
-            self.options[name] = value
-            print(f"{name} => {value}")
-            self._save_config(name)
-        else:
-            self.error('Invalid option name.')
-
-    def _do_options_unset(self, params):
-        '''Unsets a current context option'''
-        option, value = self._parse_params(params)
-        if not option:
-            self._help_options_unset()
-            return
-        name = option.upper()
-        if name in self.options:
-            self._do_options_set(' '.join([name, 'None']))
-        else:
-            self.error('Invalid option name.')
-
-    def do_keys(self, params):
-        '''Manages third party resource credentials'''
-        if not params:
-            self.help_keys()
-            return
-        arg, params = self._parse_params(params)
-        if arg in self._parse_subcommands('keys'):
-            return getattr(self, '_do_keys_'+arg)(params)
-        else:
-            self.help_keys()
-
-    def _do_keys_list(self, params):
-        '''Lists third party resource credentials'''
-        self._list_keys()
-
-    def _do_keys_add(self, params):
-        '''Adds/Updates a third party resource credential'''
-        key, value = self._parse_params(params)
-        if not (key and value):
-            self._help_keys_add()
-            return
-        if self.add_key(key, value):
-            self.output(f"Key '{key}' added.")
-
-    def _do_keys_remove(self, params):
-        '''Removes a third party resource credential'''
-        key, value = self._parse_params(params)
-        if not key:
-            self._help_keys_remove()
-            return
-        if self.get_key(key):
-            if self.remove_key(key):
-                self.output(f"Key '{key}' removed.")
-        else:
-            self.error('Invalid key name.')
-
-    def do_modules(self, params):
-        '''Interfaces with installed modules'''
-        if not params:
-            self.help_modules()
-            return
-        arg, params = self._parse_params(params)
-        if arg in self._parse_subcommands('modules'):
-            return getattr(self, '_do_modules_'+arg)(params)
-        else:
-            self.help_modules()
-
-    def _do_modules_search(self, params):
-        '''Searches installed modules'''
-        modules = [x for x in Framework._loaded_modules]
-        if params:
-            self.output(f"Searching installed modules for '{params}'...")
-            modules = [x for x in Framework._loaded_modules if re.search(params, x)]
-        if modules:
-            self._list_modules(modules)
-        else:
-            self.error('No modules found.')
-            self._help_modules_search()
-
-    def _do_modules_load(self, params):
-        '''Searches installed modules'''
-        raise NotImplementedError
-
-    def do_show(self, params):
-        '''Shows various framework items'''
-        if not params:
-            self.help_show()
-            return
-        arg, params = self._parse_params(params)
-        if arg in self._get_show_names():
-            getattr(self, 'show_' + arg)()
-        elif arg in self.get_tables():
-            self.do_db(f"query SELECT ROWID, * FROM `{arg}`")
-        else:
-            self.help_show()
-
-    def do_db(self, params):
-        '''Interfaces with the workspace's database'''
-        if not params:
-            self.help_db()
-            return
-        arg, params = self._parse_params(params)
-        if arg in self._parse_subcommands('db'):
-            return getattr(self, '_do_db_'+arg)(params)
-        else:
-            self.help_db()
-
-    def _do_db_notes(self, params):
-        '''Adds notes to rows in the database'''
-        table, params = self._parse_params(params)
-        if not table:
-            self._help_db_notes()
-            return
-        if table in self.get_tables():
-            # get rowid and note from parameters
-            if params:
-                arg, note = self._parse_params(params)
-                rowids = self._parse_rowids(arg)
-            # get rowid and note from interactive input
-            else:
-                try:
-                    # prompt user for data
-                    params = input('rowid(s) (INT): ')
-                    rowids = self._parse_rowids(params)
-                    note = input('note (TXT): ')
-                except KeyboardInterrupt:
-                    print('')
-                    return
-                finally:
-                    # ensure proper output for resource scripts
-                    if Framework._script:
-                        print(f"{params}")
-            # delete record(s) from the database
-            count = 0
-            for rowid in rowids:
-                count += self.query(f"UPDATE `{table}` SET notes=? WHERE ROWID IS ?", (note, rowid))
-            self.output(f"{count} rows affected.")
-        else:
-            self.output('Invalid table name.')
-
-    def _do_db_insert(self, params):
-        '''Inserts a row into the database'''
-        table, params = self._parse_params(params)
-        if not table:
-            self._help_db_insert()
-            return
-        if table in self.get_tables():
-            # validate insert_* method for table
-            if not hasattr(self, 'insert_' + table):
-                self.error('Cannot add records to dynamically created tables.')
-                return
-            columns = [x for x in self.get_columns(table) if x[0] != 'module']
-            # sanitize column names to avoid conflicts with builtins in insert_* method
-            sanitize_column = lambda x: '_'+x if x in ['hash', 'type'] else x
-            record = {}
-            # build record from parameters
-            if params:
-                # parse params into values by delim
-                values = params.split('~')
-                # validate parsed value input
-                if len(columns) == len(values):
-                    # assign each value to a column
-                    for i in range(0,len(columns)):
-                        record[sanitize_column(columns[i][0])] = values[i]
-                else:
-                    self.error('Columns and values length mismatch.')
-                    return
-            # build record from interactive input
-            else:
-                for column in columns:
-                    try:
-                        # prompt user for data
-                        value = input(f"{column[0]} ({column[1]}): ")
-                        record[sanitize_column(column[0])] = value
-                    except KeyboardInterrupt:
-                        print('')
-                        return
-                    finally:
-                        # ensure proper output for resource scripts
-                        if Framework._script:
-                            print(f"{value}")
-            # add record to the database
-            func = getattr(self, 'insert_' + table)
-            count = func(mute=True, **record)
-            self.output(f"{count} rows affected.")
-        else:
-            self.output('Invalid table name.')
-
-    def _do_db_delete(self, params):
-        '''Deletes a row from the database'''
-        table, params = self._parse_params(params)
-        if not table:
-            self._help_db_delete()
-            return
-        if table in self.get_tables():
-            # get rowid from parameters
-            if params:
-                rowids = self._parse_rowids(params)
-            # get rowid from interactive input
-            else:
-                try:
-                    # prompt user for data
-                    params = input('rowid(s) (INT): ')
-                    rowids = self._parse_rowids(params)
-                except KeyboardInterrupt:
-                    print('')
-                    return
-                finally:
-                    # ensure proper output for resource scripts
-                    if Framework._script:
-                        print(f"{params}")
-            # delete record(s) from the database
-            count = 0
-            for rowid in rowids:
-                count += self.query(f"DELETE FROM `{table}` WHERE ROWID IS ?", (rowid,))
-            self.output(f"{count} rows affected.")
-        else:
-            self.output('Invalid table name.')
-
-    def _do_db_query(self, params):
-        '''Queries the database with custom SQL'''
-        if not params:
-            self._help_db_query()
-            return
-        try:
-            results = self.query(params, include_header=True)
-        except sqlite3.OperationalError as e:
-            self.error(f"Invalid query. {type(e).__name__} {e}")
-            return
-        if type(results) == list:
-            header = results.pop(0)
-            if not results:
-                self.output('No data returned.')
-            else:
-                self.table(results, header=header)
-                self.output(f"{len(results)} rows returned")
-        else:
-            self.output(f"{results} rows affected.")
-
-    def _do_db_schema(self, params):
-        '''Displays the database schema'''
-        tables = self.get_tables()
-        for table in tables:
-            columns = self.get_columns(table)
-            self.table(columns, title=table)
-
-    def do_script(self, params):
-        '''Records and executes command scripts'''
-        if not params:
-            self.help_script()
-            return
-        arg, params = self._parse_params(params)
-        if arg in self._parse_subcommands('script'):
-            return getattr(self, '_do_script_'+arg)(params)
-        else:
-            self.help_script()
-
-    def _do_script_record(self, params):
-        '''Records commands in a script file'''
-        if not Framework._record:
-            filename, params = self._parse_params(params)
-            if not filename:
-                self._help_script_record()
-                return
-            if not self._is_writeable(filename):
-                self.output(f"Cannot record commands to '{filename}'.")
-            else:
-                Framework._record = filename
-                self.output(f"Recording commands to '{Framework._record}'.")
-        else:
-            self.output('Recording is already started.')
-
-    def _do_script_stop(self, params):
-        '''Stops command recording'''
-        if Framework._record:
-            self.output(f"Recording stopped. Commands saved to '{Framework._record}'.")
-            Framework._record = None
-        else:
-            self.output('Recording is already stopped.')
-
-    def _do_script_status(self, params):
-        '''Provides the status of command recording'''
-        status = 'started' if Framework._record else 'stopped'
-        self.output(f"Command recording is {status}.")
-
-    def _do_script_execute(self, params):
-        '''Executes commands from a script file'''
-        if not params:
-            self._help_script_execute()
-            return
-        if os.path.exists(params):
-            # works even when called before Recon.start due
-            # to stdin waiting for the iteractive prompt
-            sys.stdin = open(params)
-            Framework._script = 1
-        else:
-            self.error(f"Script file '{params}' not found.")
-
-    def do_spool(self, params):
-        '''Spools output to a file'''
-        if not params:
-            self.help_spool()
-            return
-        arg, params = self._parse_params(params)
-        if arg in self._parse_subcommands('spool'):
-            return getattr(self, '_do_spool_'+arg)(params)
-        else:
-            self.help_spool()
-
-    def _do_spool_start(self, params):
-        '''Starts output spooling'''
-        if not Framework._spool:
-            filename, params = self._parse_params(params)
-            if not filename:
-                self._help_spool_start()
-                return
-            if not self._is_writeable(filename):
-                self.output(f"Cannot spool output to '{filename}'.")
-            else:
-                Framework._spool = codecs.open(filename, 'ab', encoding='utf-8')
-                self.output(f"Spooling output to '{Framework._spool.name}'.")
-        else:
-            self.output('Spooling is already started.')
-
-    def _do_spool_stop(self, params):
-        '''Stops output spooling'''
-        if Framework._spool:
-            self.output(f"Spooling stopped. Output saved to '{Framework._spool.name}'.")
-            Framework._spool = None
-        else:
-            self.output('Spooling is already stopped.')
-
-    def _do_spool_status(self, params):
-        '''Provides the status of output spooling'''
-        status = 'started' if Framework._spool else 'stopped'
-        self.output(f"Output spooling is {status}.")
-
-    def do_shell(self, params):
-        '''Executes shell commands'''
-        if not params:
-            self.help_shell()
-            return
-        proc = subprocess.Popen(params, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
-        self.output(f"Command: {params}")
-        stdout = proc.stdout.read()
-        stderr = proc.stderr.read()
-        if stdout:print(f"{Colors.O}{self.to_unicode(stdout)}{Colors.N}", end='')
-        if stderr:print(f"{Colors.R}{self.to_unicode(stderr)}{Colors.N}", end='')
-
-    def do_dashboard(self, params):
-        '''Displays a summary of activity'''
-        rows = self.query('SELECT * FROM dashboard ORDER BY 1')
-        if rows:
-            # display activity table
-            tdata = []
-            for row in rows:
-                tdata.append(row)
-            self.table(tdata, header=['Module', 'Runs'], title='Activity Summary')
-            # display summary results table
-            tables = self.get_tables()
-            tdata = []
-            for table in tables:
-                count = self.query(f"SELECT COUNT(*) FROM `{table}`")[0][0]
-                tdata.append([table.title(), count])
-            self.table(tdata, header=['Category', 'Quantity'], title='Results Summary')
-        else:
-            self.output('This workspace has no record of activity.')
-
-    def do_pdb(self, params):
-        '''Starts a Python Debugger session (dev only)'''
-        import pdb
-        pdb.set_trace()
-
-    #==================================================
-    # HELP METHODS
-    #==================================================
-
-    def help_options(self):
-        print(getattr(self, 'do_options').__doc__)
-        print(f"{os.linesep}Usage: options <{'|'.join(self._parse_subcommands('options'))}> [...]{os.linesep}")
-
-    def _help_options_set(self):
-        print(getattr(self, '_do_options_set').__doc__)
-        print(f"{os.linesep}Usage: options set <option> <value>{os.linesep}")
-
-    def _help_options_unset(self):
-        print(getattr(self, '_do_options_unset').__doc__)
-        print(f"{os.linesep}Usage: options unset <option>{os.linesep}")
-
-    def help_keys(self):
-        print(getattr(self, 'do_keys').__doc__)
-        print(f"{os.linesep}Usage: keys <{'|'.join(self._parse_subcommands('keys'))}> [...]{os.linesep}")
-
-    def _help_keys_add(self):
-        print(getattr(self, '_do_keys_add').__doc__)
-        print(f"{os.linesep}Usage: keys add <name> <value>{os.linesep}")
-
-    def _help_keys_remove(self):
-        print(getattr(self, '_do_keys_remove').__doc__)
-        print(f"{os.linesep}Usage: keys remove <name>{os.linesep}")
-
-    def help_modules(self):
-        print(getattr(self, 'do_modules').__doc__)
-        print(f"{os.linesep}Usage: modules <{'|'.join(self._parse_subcommands('modules'))}> [...]{os.linesep}")
-
-    def _help_modules_search(self):
-        print(getattr(self, '_do_modules_search').__doc__)
-        print(f"{os.linesep}Usage: modules search [<regex>]{os.linesep}")
-
-    def _help_modules_load(self):
-        print(getattr(self, '_do_modules_load').__doc__)
-        print(f"{os.linesep}Usage: modules load <path>{os.linesep}")
-
-    def help_show(self):
-        options = sorted(self._get_show_names() + self.get_tables())
-        print(getattr(self, 'do_show').__doc__)
-        print(f"{os.linesep}Usage: show <{'|'.join(options)}>{os.linesep}")
-
-    def help_db(self):
-        print(getattr(self, 'do_db').__doc__)
-        print(f"{os.linesep}Usage: db <{'|'.join(self._parse_subcommands('db'))}> [...]{os.linesep}")
-
-    def _help_db_notes(self):
-        print(getattr(self, '_do_db_notes').__doc__)
-        print(f"{os.linesep}Usage: db note <table> [<rowid(s)> <note>]{os.linesep}")
-        print(f"rowid(s) => ',' delimited values or '-' delimited ranges representing rowids{os.linesep}")
-
-    def _help_db_insert(self):
-        print(getattr(self, '_do_db_insert').__doc__)
-        print(f"{os.linesep}Usage: db insert <table> [<values>]{os.linesep}")
-        print(f"values => '~' delimited string representing column values (exclude rowid, module){os.linesep}")
-
-    def _help_db_delete(self):
-        print(getattr(self, '_do_db_delete').__doc__)
-        print(f"{os.linesep}Usage: db delete <table> [<rowid(s)>]{os.linesep}")
-        print(f"rowid(s) => ',' delimited values or '-' delimited ranges representing rowids{os.linesep}")
-
-    def _help_db_query(self):
-        print(getattr(self, '_do_db_query').__doc__)
-        print(f"{os.linesep}Usage: db query <sql>{os.linesep}")
-
-    def help_script(self):
-        print(getattr(self, 'do_script').__doc__)
-        print(f"{os.linesep}Usage: script <{'|'.join(self._parse_subcommands('script'))}> [...]{os.linesep}")
-
-    def _help_script_record(self):
-        print(getattr(self, '_do_script_record').__doc__)
-        print(f"{os.linesep}Usage: script record <filename>{os.linesep}")
-
-    def _help_script_execute(self):
-        print(getattr(self, '_do_script_execute').__doc__)
-        print(f"{os.linesep}Usage: script execute <filename>{os.linesep}")
-
-    def help_spool(self):
-        print(getattr(self, 'do_spool').__doc__)
-        print(f"{os.linesep}Usage: spool <{'|'.join(self._parse_subcommands('spool'))}> [...]{os.linesep}")
-
-    def _help_spool_start(self):
-        print(getattr(self, '_do_spool_start').__doc__)
-        print(f"{os.linesep}Usage: spool start <filename>{os.linesep}")
-
-    def help_shell(self):
-        print(getattr(self, 'do_shell').__doc__)
-        print(f"{os.linesep}Usage: [shell|!] <command>{os.linesep}")
-
-    #==================================================
-    # COMPLETE METHODS
-    #==================================================
-
-    def complete_options(self, text, line, *ignored):
-        arg, params = self._parse_params(line.split(' ', 1)[1])
-        subs = self._parse_subcommands('options')
-        if arg in subs:
-            return getattr(self, '_complete_options_'+arg)(text, params)
-        return [sub for sub in subs if sub.startswith(text)]
-
-    def _complete_options_list(self, text, *ignored):
-        return []
-
-    def _complete_options_set(self, text, *ignored):
-        return [x for x in self.options if x.startswith(text.upper())]
-    _complete_options_unset = _complete_options_set
-
-    def complete_keys(self, text, line, *ignored):
-        arg, params = self._parse_params(line.split(' ', 1)[1])
-        subs = self._parse_subcommands('keys')
-        if arg in subs:
-            return getattr(self, '_complete_keys_'+arg)(text, params)
-        return [sub for sub in subs if sub.startswith(text)]
-
-    def _complete_keys_list(self, text, *ignored):
-        return []
-
-    def _complete_keys_add(self, text, *ignored):
-        return [x for x in self._get_key_names() if x.startswith(text)]
-    _complete_keys_remove = _complete_keys_add
-
-    def complete_modules(self, text, line, *ignored):
-        arg, params = self._parse_params(line.split(' ', 1)[1])
-        subs = self._parse_subcommands('modules')
-        if arg in subs:
-            return getattr(self, '_complete_modules_'+arg)(text, params)
-        return [sub for sub in subs if sub.startswith(text)]
-
-    def _complete_modules_search(self, text, *ignored):
-        return []
-
-    def _complete_modules_load(self, text, *ignored):
-        return [x for x in Framework._loaded_modules if x.startswith(text)]
-
-    def complete_show(self, text, line, *ignored):
-        options = sorted(self._get_show_names() + self.get_tables())
-        return [x for x in options if x.startswith(text)]
-
-    def complete_db(self, text, line, *ignored):
-        arg, params = self._parse_params(line.split(' ', 1)[1])
-        subs = self._parse_subcommands('db')
-        if arg in subs:
-            return getattr(self, '_complete_db_'+arg)(text, params)
-        return [sub for sub in subs if sub.startswith(text)]
-
-    def _complete_db_insert(self, text, *ignored):
-        return [x for x in sorted(self.get_tables()) if x.startswith(text)]
-    _complete_db_notes = _complete_db_delete = _complete_db_insert
-
-    def _complete_db_query(self, text, *ignored):
-        return []
-    _complete_db_schema = _complete_db_query
-
-    def complete_script(self, text, line, *ignored):
-        arg, params = self._parse_params(line.split(' ', 1)[1])
-        subs = self._parse_subcommands('script')
-        if arg in subs:
-            return getattr(self, '_complete_script_'+arg)(text, params)
-        return [sub for sub in subs if sub.startswith(text)]
-
-    def _complete_script_record(self, text, *ignored):
-        return []
-    _complete_script_execute = _complete_script_status = _complete_script_stop = _complete_script_record
-
-    def complete_spool(self, text, line, *ignored):
-        arg, params = self._parse_params(line.split(' ', 1)[1])
-        subs = self._parse_subcommands('spool')
-        if arg in subs:
-            return getattr(self, '_complete_spool_'+arg)(text, params)
-        return [sub for sub in subs if sub.startswith(text)]
-
-    def _complete_spool_start(self, text, *ignored):
-        return []
-    _complete_spool_status = _complete_spool_stop = _complete_spool_start

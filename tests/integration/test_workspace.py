@@ -66,12 +66,14 @@ class TestWorkspaceCreation:
             assert table in tables, f"Missing table: {table}"
     
     def test_workspace_prompt_updated(self, mock_recon, temp_home_path):
-        """Test prompt is updated with workspace name."""
+        """Test workspace path is updated with workspace name."""
         with patch.object(mock_recon, '_load_config'), \
              patch.object(mock_recon, '_load_modules'):
             mock_recon._init_workspace('prompt_test')
         
-        assert 'prompt_test' in mock_recon.prompt
+        # Verify the workspace path contains the workspace name
+        # (prompt is a CLI attribute, workspace is the core attribute)
+        assert 'prompt_test' in mock_recon.workspace
 
 
 @pytest.mark.integration

@@ -2,6 +2,11 @@
 Unit tests for the recon-ng web reports module (web/reports.py).
 
 Tests the report generation functions (xlsx, pushpin).
+
+NOTE: The web module has been rewritten from Flask to Sanic with RabbitMQ RPC.
+The Flask-based reports module has been replaced. Report generation now works
+through the RPC architecture. These tests are skipped until new tests are
+written for the Sanic-based web reports.
 """
 import os
 import sys
@@ -9,6 +14,11 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
+
+# Skip the entire module - Flask reports module has been replaced
+pytestmark = pytest.mark.skip(
+    reason="Web module rewritten from Flask to Sanic - Flask-based report tests are obsolete"
+)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 

@@ -42,6 +42,150 @@ class TestColors:
         assert Colors.B == '\033[34m'
 
 
+class TestFrameworkModuleAPI:
+    """Tests that Framework has all methods required by modules.
+    
+    Modules inherit from Framework and expect certain methods to be available.
+    These tests verify the core Framework class provides these methods,
+    even if they're no-ops that get overridden by mixins or event publishers.
+    """
+    
+    def test_framework_has_output_method(self):
+        """Test Framework has output method for modules."""
+        assert hasattr(Framework, 'output')
+        assert callable(getattr(Framework, 'output'))
+    
+    def test_framework_has_alert_method(self):
+        """Test Framework has alert method for modules."""
+        assert hasattr(Framework, 'alert')
+        assert callable(getattr(Framework, 'alert'))
+    
+    def test_framework_has_error_method(self):
+        """Test Framework has error method for modules."""
+        assert hasattr(Framework, 'error')
+        assert callable(getattr(Framework, 'error'))
+    
+    def test_framework_has_verbose_method(self):
+        """Test Framework has verbose method for modules."""
+        assert hasattr(Framework, 'verbose')
+        assert callable(getattr(Framework, 'verbose'))
+    
+    def test_framework_has_debug_method(self):
+        """Test Framework has debug method for modules."""
+        assert hasattr(Framework, 'debug')
+        assert callable(getattr(Framework, 'debug'))
+    
+    def test_framework_has_heading_method(self):
+        """Test Framework has heading method for modules."""
+        assert hasattr(Framework, 'heading')
+        assert callable(getattr(Framework, 'heading'))
+    
+    def test_framework_has_table_method(self):
+        """Test Framework has table method for modules."""
+        assert hasattr(Framework, 'table')
+        assert callable(getattr(Framework, 'table'))
+
+
+class TestFrameworkOutputWithContext:
+    """Tests that Framework output methods use events when execution context is active.
+    
+    This verifies that when modules run in the server, their output is routed
+    through the RPC event system to the client.
+    
+    Note: These tests use the core Framework class directly, not TestFramework,
+    because TestFramework overrides output methods for CLI testing.
+    """
+    
+    @pytest.fixture
+    def mock_event_publisher(self):
+        """Create a mock event publisher that records calls."""
+        class MockEventPublisher:
+            def __init__(self):
+                self.calls = []
+            def output(self, msg): self.calls.append(('output', msg))
+            def alert(self, msg): self.calls.append(('alert', msg))
+            def error(self, msg): self.calls.append(('error', msg))
+            def heading(self, text, level): self.calls.append(('heading', text, level))
+            def table(self, rows, header, title): self.calls.append(('table', rows, header, title))
+            def verbose(self, msg): self.calls.append(('verbose', msg))
+            def debug(self, msg): self.calls.append(('debug', msg))
+        return MockEventPublisher()
+    
+    @pytest.fixture
+    def mock_context(self, mock_event_publisher):
+        """Create a mock execution context."""
+        class MockContext:
+            def __init__(self, events):
+                self.events = events
+        return MockContext(mock_event_publisher)
+    
+    @pytest.fixture
+    def core_framework(self):
+        """Create a core Framework instance (not TestFramework) for testing."""
+        fw = Framework('test')
+        fw._global_options = Options()
+        fw._global_options.init_option('VERBOSITY', 1, True, 'verbosity')
+        fw.ruler = '-'
+        fw.spacer = '  '
+        return fw
+    
+    def test_output_uses_events_in_context(self, core_framework, mock_context):
+        """Test output() routes through events when context is active."""
+        from recon.server.interceptors import set_current_context
+        
+        set_current_context(mock_context)
+        try:
+            core_framework.output('test message')
+            assert ('output', 'test message') in mock_context.events.calls
+        finally:
+            set_current_context(None)
+    
+    def test_alert_uses_events_in_context(self, core_framework, mock_context):
+        """Test alert() routes through events when context is active."""
+        from recon.server.interceptors import set_current_context
+        
+        set_current_context(mock_context)
+        try:
+            core_framework.alert('test alert')
+            assert ('alert', 'test alert') in mock_context.events.calls
+        finally:
+            set_current_context(None)
+    
+    def test_error_uses_events_in_context(self, core_framework, mock_context):
+        """Test error() routes through events when context is active."""
+        from recon.server.interceptors import set_current_context
+        
+        set_current_context(mock_context)
+        try:
+            core_framework.error('test error')
+            # Error adds punctuation if missing
+            assert ('error', 'Test error.') in mock_context.events.calls
+        finally:
+            set_current_context(None)
+    
+    def test_heading_uses_events_in_context(self, core_framework, mock_context):
+        """Test heading() routes through events when context is active."""
+        from recon.server.interceptors import set_current_context
+        
+        set_current_context(mock_context)
+        try:
+            core_framework.heading('test heading', level=0)
+            assert ('heading', 'test heading', 0) in mock_context.events.calls
+        finally:
+            set_current_context(None)
+    
+    def test_output_prints_without_context(self, core_framework, capsys):
+        """Test output() prints directly when no context is active."""
+        from recon.server.interceptors import set_current_context
+        
+        # Ensure no context
+        set_current_context(None)
+        
+        core_framework.output('direct output')
+        captured = capsys.readouterr()
+        assert 'direct output' in captured.out
+
+
 class TestFrameworkIsHash:
     """Tests for is_hash method."""
     

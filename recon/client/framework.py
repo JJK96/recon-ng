@@ -115,26 +115,29 @@ class AsyncFramework(cmd.Cmd):
         data = event.data or {}
         
         if event.type == EventType.OUTPUT:
-            # Message is already formatted by the server's intercepted print
-            # (includes [*] prefix and colors), so just print directly
+            # Format and display normal output
             message = data.get('message', '')
-            print(message)
+            print(f"{Colors.B}[*]{Colors.N} {message}")
         
         elif event.type == EventType.ALERT:
-            # Already formatted by server
-            print(data.get('message', ''))
+            # Format and display important output
+            message = data.get('message', '')
+            print(f"{Colors.G}[*]{Colors.N} {message}")
         
         elif event.type == EventType.ERROR:
-            # Already formatted by server
-            print(data.get('message', 'Unknown error'))
+            # Format and display errors
+            message = data.get('message', 'Unknown error')
+            print(f"{Colors.R}[!] {message}{Colors.N}")
         
         elif event.type == EventType.VERBOSE:
-            # Already formatted by server
-            print(data.get('message', ''))
+            # Format verbose output (same as output)
+            message = data.get('message', '')
+            print(f"{Colors.B}[*]{Colors.N} {message}")
         
         elif event.type == EventType.DEBUG:
-            # Already formatted by server
-            print(data.get('message', ''))
+            # Format debug output (same as output)
+            message = data.get('message', '')
+            print(f"{Colors.B}[*]{Colors.N} {message}")
         
         elif event.type == EventType.TABLE:
             self.table(

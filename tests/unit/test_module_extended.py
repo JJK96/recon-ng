@@ -18,9 +18,10 @@ from datetime import datetime
 from recon.core.module import BaseModule
 from recon.core.framework import Framework, Options, FrameworkException
 from recon.utils.validators import ValidationException
+from tests.fixtures.cli_test_framework import TestModuleMixin
 
 
-class MockModuleWithKeys(BaseModule):
+class MockModuleWithKeys(TestModuleMixin, BaseModule):
     """Mock module that requires API keys."""
     
     meta = {
@@ -36,7 +37,7 @@ class MockModuleWithKeys(BaseModule):
             super().__init__(*args, **kwargs)
 
 
-class MockModuleWithOptions(BaseModule):
+class MockModuleWithOptions(TestModuleMixin, BaseModule):
     """Mock module with custom options."""
     
     meta = {
@@ -55,7 +56,7 @@ class MockModuleWithOptions(BaseModule):
             super().__init__(*args, **kwargs)
 
 
-class MockModuleWithQuery(BaseModule):
+class MockModuleWithQuery(TestModuleMixin, BaseModule):
     """Mock module with query and validator."""
     
     meta = {
@@ -84,7 +85,7 @@ class MockModuleWithQuery(BaseModule):
         pass
 
 
-class MockModuleWithComments(BaseModule):
+class MockModuleWithComments(TestModuleMixin, BaseModule):
     """Mock module with comments in meta."""
     
     meta = {

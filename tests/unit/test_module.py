@@ -14,9 +14,10 @@ from datetime import datetime
 
 from recon.core.module import BaseModule
 from recon.core.framework import Framework, Options, FrameworkException
+from tests.fixtures.cli_test_framework import TestModuleMixin
 
 
-class MockModule(BaseModule):
+class MockModule(TestModuleMixin, BaseModule):
     """Mock module for testing."""
     
     meta = {

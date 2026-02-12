@@ -1,7 +1,23 @@
+"""
+Recon-ng Module Base Class
+
+This module provides the BaseModule class which all recon-ng modules inherit from.
+It provides:
+- Module initialization and option registration
+- Source data retrieval (_get_source)
+- Input validation
+- HTTP helper methods
+- Module execution hooks (module_pre, module_run, module_post)
+
+This module does NOT contain any CLI-specific code. CLI functionality
+is implemented in recon/client/.
+"""
+
 from requests.exceptions import Timeout
 import html
 import http.cookiejar
 import io
+import json
 import os
 import re
 import socket
@@ -9,6 +25,7 @@ import sqlite3
 import sys
 import textwrap
 import yaml
+
 # framework libs
 from recon.core import framework
 from recon.utils import validators
@@ -18,6 +35,14 @@ from recon.utils import validators
 #=================================================
 
 class BaseModule(framework.Framework):
+    """
+    Base class for all recon-ng modules.
+    
+    Modules inherit from this class and implement:
+    - meta: Dictionary with module metadata (name, author, description, etc.)
+    - module_run(): Core module logic
+    - Optionally: module_pre(), module_post() for setup/teardown
+    """
 
     def __init__(self, params):
         framework.Framework.__init__(self, params)
@@ -88,7 +113,7 @@ class BaseModule(framework.Framework):
                 self.error(f"Corrupt key file. Manual migration of '{key}' required.")
 
     def ascii_sanitize(self, s):
-        return ''.join([char for char in s if ord(char) in [10,13] + range(32, 126)])
+        return ''.join([char for char in s if ord(char) in [10, 13] + list(range(32, 126))])
 
     def html_unescape(self, s):
         '''Unescapes HTML markup and returns an unescaped string.'''
@@ -102,7 +127,7 @@ class BaseModule(framework.Framework):
             '>': '&gt;',
             '<': '&lt;',
             }
-        return ''.join(escapes.get(c,c) for c in s)
+        return ''.join(escapes.get(c, c) for c in s)
 
     def cidr_to_list(self, string):
         import ipaddress
@@ -151,6 +176,16 @@ class BaseModule(framework.Framework):
     #==================================================
 
     def _get_source(self, params, query=None):
+        """
+        Get input data based on the SOURCE option.
+        
+        Args:
+            params: Source parameter value (e.g., 'default', 'query SELECT...', filepath, or literal value)
+            query: Default query to use when params is 'default'
+            
+        Returns:
+            List of input values
+        """
         prefix = params.split()[0].lower()
         if prefix in ['query', 'default']:
             query = ' '.join(params.split()[1:]) if prefix == 'query' else query
@@ -162,7 +197,6 @@ class BaseModule(framework.Framework):
                 sources = []
             elif len(results[0]) > 1:
                 sources = [x[:len(x)] for x in results]
-                #raise framework.FrameworkException('Too many columns of data as source input.')
             else:
                 sources = [x[0] for x in results]
         elif os.path.exists(params):
@@ -194,132 +228,26 @@ class BaseModule(framework.Framework):
             discard=False,
             comment=None,
             comment_url=None,
-            rest=None
+            rest={}
         )
 
     #==================================================
-    # COMMAND METHODS
+    # MODULE EXECUTION
     #==================================================
 
-    def do_goptions(self, params):
-        '''Manages the global context options'''
-        if not params:
-            self.help_goptions()
-            return
-        arg, params = self._parse_params(params)
-        if arg in self._parse_subcommands('goptions'):
-            return getattr(self, '_do_goptions_'+arg)(params)
-        else:
-            self.help_goptions()
-
-    def _do_goptions_list(self, params):
-        '''Shows the global context options'''
-        self._list_options(self._global_options)
-
-    def _do_goptions_set(self, params):
-        '''Sets a global context option'''
-        option, value = self._parse_params(params)
-        if not (option and value):
-            self._help_goptions_set()
-            return
-        name = option.upper()
-        if name in self._global_options:
-            self._global_options[name] = value
-            print(f"{name} => {value}")
-            self._save_config(name, 'base', self._global_options)
-        else:
-            self.error('Invalid option name.')
-
-    def _do_goptions_unset(self, params):
-        '''Unsets a global context option'''
-        option, value = self._parse_params(params)
-        if not option:
-            self._help_goptions_unset()
-            return
-        name = option.upper()
-        if name in self._global_options:
-            self._do_goptions_set(' '.join([name, 'None']))
-        else:
-            self.error('Invalid option name.')
-
-    def _do_modules_load(self, params):
-        '''Loads a module'''
-        if not params:
-            self._help_modules_load()
-            return
-        # finds any modules that contain params
-        modules = self._match_modules(params)
-        # notify the user if none or multiple modules are found
-        if len(modules) != 1:
-            if not modules:
-                self.error('Invalid module name.')
-            else:
-                self.output(f"Multiple modules match '{params}'.")
-                self._list_modules(modules)
-            return
-        # compensation for stdin being used for scripting and loading
-        if framework.Framework._script:
-            end_string = sys.stdin.read()
-        else:
-            end_string = 'EOF'
-            framework.Framework._load = 1
-        sys.stdin = io.StringIO(f"modules load {modules[0]}{os.linesep}{end_string}")
-        return True
-
-    def do_reload(self, params):
-        '''Reloads the loaded module'''
-        self._reload = 1
-        return True
-
-    def do_info(self, params):
-        '''Shows details about the loaded module'''
-        print('')
-        # meta info
-        for item in ['name', 'author', 'version']:
-            print(f"{item.title().rjust(10)}: {self.meta[item]}")
-        # required keys
-        if self.meta.get('required_keys'):
-            print(f"{'keys'.title().rjust(10)}: {', '.join(self.meta.get('required_keys'))}")
-        print('')
-        # description
-        print('Description:')
-        print(f"{self.spacer}{textwrap.fill(self.meta['description'], 100, subsequent_indent=self.spacer)}")
-        print('')
-        # options
-        print('Options:', end='')
-        self._list_options()
-        # sources
-        if hasattr(self, '_default_source'):
-            print('Source Options:')
-            print(f"{self.spacer}{'default'.ljust(15)}{self._default_source}")
-            print(f"{self.spacer}{'<string>'.ljust(15)}string representing a single input")
-            print(f"{self.spacer}{'<path>'.ljust(15)}path to a file containing a list of inputs")
-            print(f"{self.spacer}{'query <sql>'.ljust(15)}database query returning one column of inputs")
-            print('')
-        # comments
-        if self.meta.get('comments'):
-            print('Comments:')
-            for comment in self.meta['comments']:
-                prefix = '* '
-                if comment.startswith('\t'):
-                    prefix = self.spacer+'- '
-                    comment = comment[1:]
-                print(f"{self.spacer}{textwrap.fill(prefix+comment, 100, subsequent_indent=self.spacer)}")
-            print('')
-
-    def do_input(self, params):
-        '''Shows inputs based on the source option'''
-        if hasattr(self, '_default_source'):
-            try:
-                self._validate_options()
-                inputs = self._get_source(self.options['source'], self._default_source)
-                self.table([[x] for x in inputs], header=['Module Inputs'])
-            except Exception as e:
-                self.output(e.__str__())
-        else:
-            self.output('Source option not available for this module.')
-
     def run(self):
+        """
+        Execute the module.
+        
+        This method:
+        1. Validates options
+        2. Validates input
+        3. Resets summary counts
+        4. Calls module_pre() hook
+        5. Calls module_run() with inputs
+        6. Calls module_post() hook
+        7. Updates the dashboard
+        """
         self._validate_options()
         self._validate_input()
         self._summary_counts = {}
@@ -336,80 +264,18 @@ class BaseModule(framework.Framework):
         self.module_run(*params)
         self.module_post()
 
-    def do_run(self, params):
-        '''Runs the loaded module'''
-        try:
-            self.run()
-        except KeyboardInterrupt:
-            print('')
-        except (Timeout, socket.timeout):
-            self.print_exception()
-            self.error('A request took too long to complete. If the issue persists, increase the global TIMEOUT option.')
-        except (framework.FrameworkException, validators.ValidationException):
-            self.print_exception()
-        except Exception:
-            self.print_exception()
-            self.error('Something broken? See https://github.com/lanmaster53/recon-ng/wiki/Troubleshooting#issue-reporting.')
-        finally:
-            # print module summary
-            if self._summary_counts:
-                self.heading('Summary', level=0)
-                for table in self._summary_counts:
-                    new = self._summary_counts[table]['new']
-                    cnt = self._summary_counts[table]['count']
-                    if new > 0:
-                        method = getattr(self, 'alert')
-                    else:
-                        method = getattr(self, 'output')
-                    method(f"{cnt} total ({new} new) {table} found.")
-
-    #==================================================
-    # HELP METHODS
-    #==================================================
-
-    def help_goptions(self):
-        print(getattr(self, 'do_goptions').__doc__)
-        print(f"{os.linesep}Usage: goptions <{'|'.join(self._parse_subcommands('goptions'))}> [...]{os.linesep}")
-
-    def _help_goptions_set(self):
-        print(getattr(self, '_do_goptions_set').__doc__)
-        print(f"{os.linesep}Usage: goptions set <option> <value>{os.linesep}")
-
-    def _help_goptions_unset(self):
-        print(getattr(self, '_do_goptions_unset').__doc__)
-        print(f"{os.linesep}Usage: goptions unset <option>{os.linesep}")
-
-    #==================================================
-    # COMPLETE METHODS
-    #==================================================
-
-    def complete_goptions(self, text, line, *ignored):
-        arg, params = self._parse_params(line.split(' ', 1)[1])
-        subs = self._parse_subcommands('goptions')
-        if arg in subs:
-            return getattr(self, '_complete_goptions_'+arg)(text, params)
-        return [sub for sub in subs if sub.startswith(text)]
-
-    def _complete_goptions_list(self, text, *ignored):
-        return []
-
-    def _complete_goptions_set(self, text, *ignored):
-        return [x for x in self._global_options if x.startswith(text.upper())]
-    _complete_goptions_unset = _complete_goptions_set
-
-    def complete_reload(self, text, *ignored):
-        return []
-    complete_info = complete_input = complete_run = complete_reload
-
     #==================================================
     # HOOK METHODS
     #==================================================
 
     def module_pre(self):
+        """Hook called before module_run(). Return value is passed to module_run()."""
         pass
 
     def module_run(self):
+        """Main module logic. Override this in your module."""
         pass
 
     def module_post(self):
+        """Hook called after module_run(). Use for cleanup."""
         pass

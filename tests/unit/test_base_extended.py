@@ -22,6 +22,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from recon.core import framework
 from recon.core.framework import Framework, Options
+from recon.core.base import Recon
+from tests.fixtures.cli_test_framework import TestReconMixin
+
+
+class TestRecon(TestReconMixin, Recon):
+    """Test-friendly Recon class with CLI methods for testing."""
+    pass
 
 
 # =============================================================================
@@ -103,7 +110,6 @@ def recon_test_env(tmp_path):
 @pytest.fixture
 def isolated_recon(recon_test_env):
     """Create an isolated Recon instance with no external dependencies."""
-    from recon.core.base import Recon
     from recon.core.framework import Framework
     
     original_state = {
@@ -116,13 +122,13 @@ def isolated_recon(recon_test_env):
         '_loaded_modules': Framework._loaded_modules.copy() if hasattr(Framework, '_loaded_modules') else {},
     }
     
-    with patch.object(Recon, '_check_version'), \
-         patch.object(Recon, '_fetch_module_index'), \
-         patch.object(Recon, '_load_modules'), \
-         patch.object(Recon, '_send_analytics'), \
-         patch.object(Recon, '_init_workspace'):
+    with patch.object(TestRecon, '_check_version'), \
+         patch.object(TestRecon, '_fetch_module_index'), \
+         patch.object(TestRecon, '_load_modules'), \
+         patch.object(TestRecon, '_send_analytics'), \
+         patch.object(TestRecon, '_init_workspace'):
         
-        recon = Recon(check=False, analytics=False, marketplace=False)
+        recon = TestRecon(check=False, analytics=False, marketplace=False)
         
         # Configure paths
         recon.home_path = recon_test_env['home_path']

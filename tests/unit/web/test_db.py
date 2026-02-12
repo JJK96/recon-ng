@@ -2,6 +2,12 @@
 Unit tests for the recon-ng web database module (web/db.py).
 
 Tests the Tasks class which manages background task persistence.
+
+NOTE: The web module has been rewritten from Flask to Sanic with RabbitMQ RPC.
+The Tasks database class (recon.core.web.db.Tasks) no longer exists. Task tracking
+is now handled by the TaskTracker class in recon/core/web/__init__.py which uses
+in-memory storage. These tests are skipped until new tests are written for the
+new task tracking system.
 """
 import os
 import sys
@@ -11,6 +17,11 @@ import tempfile
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
+
+# Skip the entire module - Flask/SQLite task DB has been replaced
+pytestmark = pytest.mark.skip(
+    reason="recon.core.web.db.Tasks no longer exists - replaced by in-memory TaskTracker"
+)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 

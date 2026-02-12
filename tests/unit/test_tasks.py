@@ -2,6 +2,11 @@
 Unit tests for the recon-ng tasks module (tasks.py).
 
 Tests the background task execution functions.
+
+NOTE: This module tests the old Flask/RQ-based background task system which has been
+replaced by the RabbitMQ RPC architecture. The recon.core.tasks module no longer exists.
+These tests are skipped until new tests are written for the RPC-based task system in
+recon/server/ and recon/client/.
 """
 import os
 import sys
@@ -9,6 +14,11 @@ import traceback
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
+
+# Skip the entire module - the Flask/RQ task system has been replaced with RabbitMQ RPC
+pytestmark = pytest.mark.skip(
+    reason="recon.core.tasks module no longer exists - replaced by RabbitMQ RPC architecture"
+)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 

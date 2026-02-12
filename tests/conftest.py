@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recon.core import framework
 from recon.core.framework import Framework, Options, FrameworkException
+from tests.fixtures.cli_test_framework import TestFramework
 
 
 # =============================================================================
@@ -146,14 +147,17 @@ def temp_workspace(temp_home_path):
 
 @pytest.fixture
 def mock_framework(temp_home_path, temp_workspace):
-    """Create a Framework instance with paths overridden for testing.
+    """Create a TestFramework instance with paths overridden for testing.
+    
+    Uses TestFramework which provides CLI methods (do_*, help_*, complete_*)
+    backed by direct business logic (no RPC/server required).
     
     Returns:
-        Framework: Configured Framework instance
+        TestFramework: Configured TestFramework instance with CLI methods
     """
     workspace_path, workspace_name = temp_workspace
     
-    # Override class-level paths
+    # Override class-level paths on both Framework and TestFramework
     Framework.home_path = str(temp_home_path)
     Framework.mod_path = str(temp_home_path / "modules")
     Framework.data_path = str(temp_home_path / "data")
@@ -171,9 +175,12 @@ def mock_framework(temp_home_path, temp_workspace):
     Framework._global_options.init_option('user-agent', 'Recon-ng/test', True, 'user-agent')
     Framework._global_options.init_option('verbosity', 1, True, 'verbosity level')
     
-    # Create Framework instance
-    fw = Framework('test')
-    fw.options = Framework._global_options
+    # Create TestFramework instance (has CLI methods)
+    fw = TestFramework('test')
+    fw.options = Options()
+    fw.options.init_option('SOURCE', 'default', True, 'data source')
+    fw.options.init_option('THREADS', 10, False, 'thread count')
+    fw.options.init_option('VERBOSE', False, False, 'verbose output')
     
     return fw
 
